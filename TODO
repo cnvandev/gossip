@@ -1,0 +1,16 @@
+Features:
+- Add a storage layer, search/filter through the database.
+- Keep a listing of peers on the current network, as well as one on other
+  networks. Maybe also keep a listing for devices & services.
+
+Tech Debt/Tooling:
+- Generate API docs from the docstrings.
+- Make an email message class, just to flex on em
+
+Implementation:
+- Make a proper boot counter setup. I might have to hook it up to camping?
+- Repeat UDP requests & responses according to the UPnP spec.
+
+Notifications:
+- Get it sending an update whenever the IP address changes - can I listen for
+  network changes?
