@@ -2,7 +2,7 @@ from enum import StrEnum
 
 
 class Strength(StrEnum):
-    """The strength of an extension, either mandatory or optional.
+    """The strength of a request, either mandatory or optional.
 
     The value is the key used for the extension declaration header.
     For most purposes it's a boolean mandatory or optional, so the value just

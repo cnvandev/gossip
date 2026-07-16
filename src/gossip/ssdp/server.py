@@ -5,7 +5,7 @@ from typing import Iterable, Mapping
 from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.server import HTTPServer
-from gossip.internet.resource import ResourceCollection
+from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.network.prompter import Prompter

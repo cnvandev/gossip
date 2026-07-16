@@ -3,7 +3,7 @@ from collections import UserDict
 from collections.abc import Buffer
 from typing import Any, Mapping
 
-from gossip.internet.predicate import RequestPredicate
+from gossip.http.predicate import RequestPredicate
 from gossip.internet.uri import URI
 
 log = logging.getLogger(__name__)

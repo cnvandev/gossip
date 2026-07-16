@@ -3,7 +3,7 @@ from http import HTTPMethod, HTTPStatus
 from typing import Any, Awaitable, Callable, Iterable, Mapping
 
 from gossip.http.message import HTTPRequest, HTTPResponse
-from gossip.internet.resource import ResourceCollection
+from gossip.http.resource import ResourceCollection
 
 log = logging.getLogger(__name__)
 

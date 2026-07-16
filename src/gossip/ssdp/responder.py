@@ -5,7 +5,7 @@ from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.framework import Extension
 from gossip.http.extension.responder import ExtendedHTTPResponder
 from gossip.http.message import HTTPResponse
-from gossip.internet.resource import ResourceCollection
+from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
 
 log = logging.getLogger(__name__)

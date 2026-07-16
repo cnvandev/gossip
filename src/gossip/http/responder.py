@@ -8,8 +8,9 @@ from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.internet.mime import MediaType
 from gossip.internet.product import ProductStack
-from gossip.internet.resource import ResourceCollection
 from gossip.internet.uri import URI
+from gossip.http.resource import ResourceCollection
+from gossip.http.predicate import RequestPredicate
 from gossip.network.endpoint import Endpoint
 from gossip.network.serializer import Serializable
 
@@ -44,15 +45,15 @@ class HTTPResponder(ResourceCollection):
         resources: Mapping[URI, ResourceCollection],
         accessor: HTTPAccessor | None = None,
         static_headers: dict[str, str] | None = None,
+        predicates: Mapping[str, RequestPredicate] | None = None,
     ):
-        # We explicitly set no predicates for this resource, as we want to allow
-        # all requests to `*`.
-        super().__init__()
+        super().__init__(predicates)
 
         # Default headers for all responses includes the server information.
         if static_headers is None:
             static_headers = dict()
         static_headers["Server"] = str(ProductStack.gossip())
+        self.static_headers = static_headers
 
         # Our collection of resources includes this object as a root object, to
         # provide information about server capabilities.
@@ -64,10 +65,6 @@ class HTTPResponder(ResourceCollection):
         if accessor is None:
             accessor = HTTPAccessor()
         self.accessor = accessor
-
-        if static_headers is None:
-            static_headers = dict()
-        self.static_headers = static_headers
 
     def __repr__(self) -> str:
         return f"<{self.__class__.__name__}, resources={self.resources}, data={self.data}>"

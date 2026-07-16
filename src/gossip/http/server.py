@@ -6,7 +6,7 @@ from typing import Mapping
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest
 from gossip.http.responder import HTTPResponder
-from gossip.internet.resource import ResourceCollection
+from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
 from gossip.network.replier import Replier
 

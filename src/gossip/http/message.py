@@ -3,10 +3,8 @@ from asyncio.streams import StreamReader, StreamWriter
 from collections.abc import Buffer
 from functools import cache
 from http import HTTPStatus
-from ipaddress import ip_address
 from typing import Awaitable, Callable, Iterable, Mapping, Self
 
-from gossip.dns import resolve_ip
 from gossip.internet.message import InternetMessage, read_into_memory
 from gossip.internet.product import Product
 from gossip.internet.uri import URI
@@ -107,48 +105,6 @@ class HTTPRequest(HTTPMessage):
         else:
             log.warning(f"Invalid HTTP protocol `{protocol_string}`, not decoding.")
             return None
-
-    @classmethod
-    def for_url(cls, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self, Endpoint]:
-        if not headers:
-            headers = dict()
-        headers = dict(headers) | {"Host": str(uri.netloc)}
-
-        if uri.hostname is not None:
-            try:
-                address = ip_address(uri.hostname)
-            except ValueError:
-                ip_addresses = resolve_ip(uri.hostname)
-                address = ip_addresses[0]
-        else:
-            address = ip_address("127.0.0.1")
-        endpoint = Endpoint(address, uri.port or 80)
-        request_uri = uri._replace(scheme="", netloc=None)
-        return cls(method, request_uri, headers), endpoint
-
-    @classmethod
-    def get(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("GET", uri, headers)
-
-    @classmethod
-    def post(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("POST", uri, headers)
-
-    @classmethod
-    def put(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("PUT", uri, headers)
-
-    @classmethod
-    def patch(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("PATCH", uri, headers)
-
-    @classmethod
-    def delete(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("DELETE", uri, headers)
-
-    @classmethod
-    def head(cls, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[Self | None, Endpoint]:
-        return cls.for_url("HEAD", uri, headers)
 
 
 class HTTPResponse(HTTPMessage):

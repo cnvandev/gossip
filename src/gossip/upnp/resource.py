@@ -1,13 +1,28 @@
 import logging
 
-from gossip.internet.predicate import StringPredicate
-from gossip.internet.resource import ResourceCollection
+from gossip.http.predicate import StringPredicate
+from gossip.http.resource import ResourceCollection
 from gossip.ssdp.headers import BOOT_ID, CONFIG_ID
 from gossip.ssdp.uri import SSDPTarget
 from gossip.upnp.model.descriptor import Device, DeviceSpec, Version
 from gossip.upnp.uri import ESCAPED_SCHEMA
 
 log = logging.getLogger(__name__)
+
+
+# {
+#     "Host": str,  # the host to send the request to
+#     "ST": SSDPTarget.parse,  # the service type to discover
+#     "MX": int,  # the maximum wait time in seconds
+#     "NLS": str,
+#     str(CPFN): str,  # the friendly name of the control point
+
+#     "NT": SSDPTarget.parse,  # The notification target
+#     "NTS": URI.parse,  # The notification subtype: `ssdp:alive`, `ssdp:update`, or `ssdp:byebye`.
+#     "USN": UniqueServiceName.parse,  # The USN of the notifier
+#     str(BOOT_ID): str,
+#     str(CONFIG_ID): str,
+# },
 
 
 class UPnPDevice(ResourceCollection):

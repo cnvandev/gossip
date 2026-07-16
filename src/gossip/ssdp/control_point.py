@@ -5,14 +5,12 @@ from uuid import UUID
 
 from aiostream import Stream
 
-from gossip.http.extension.message import ExtendedHTTPRequest
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.network.radio import Radio
 from gossip.ssdp.client import SSDPClient
-from gossip.ssdp.extension import BROADCAST_DISCOVER, UNICAST_DISCOVER
 from gossip.ssdp.headers import CPFN, CPUUID, TCP_PORT
 from gossip.ssdp.server import SSDPServer
 from gossip.ssdp.uri import SSDP_HOST, SSDPTarget
@@ -52,24 +50,21 @@ class SSDPControlPoint:
         log.info("%r on %s: %s", request, sender, usn)
         self.devices[usn] = metadata
 
-    async def broadcast_search(self, target: SSDPTarget, address: URI = URI.parse("*"), max_wait: int = 5) -> Stream[HTTPResponse]:
+    async def broadcast_search(self, target: SSDPTarget, max_wait: int = 5) -> Stream[HTTPResponse]:
         """Sends out an SSDP search message to the specified address."""
         log.info("Starting search for %s (for %ds).", target, max_wait)
         headers = {
-            BROADCAST_DISCOVER: {
-                "Host": str(SSDP_HOST),
-                str(CPUUID): str(self.uuid),
-                str(CPFN): str(self.friendly_name),
-                "ST": str(target),
-                "MX": str(max_wait),
-            },
+            "Host": str(SSDP_HOST),
+            str(CPUUID): str(self.uuid),
+            str(CPFN): str(self.friendly_name),
+            "ST": str(target),
+            "MX": str(max_wait),
         }
-        message, _ = ExtendedHTTPRequest.for_url("SEARCH", address, headers)
-        return await self.client.broadcast_request(message, max_wait=max_wait)
+        return await self.client.broadcast_search(headers, max_wait=max_wait)
 
-    async def unicast_search(self, remote_host: Endpoint, target: SSDPTarget, address: URI = URI.parse("*"), tcp_port: int | None = None) -> HTTPResponse | None:
+    async def unicast_search(self, remote_host: Endpoint, target: SSDPTarget, tcp_port: int | None = None) -> HTTPResponse | None:
         """Sends out an SSDP search message to the specified address & port."""
-        discover_headers = {
+        headers = {
             "Host": str(remote_host),
             str(CPUUID): str(self.uuid),
             str(CPFN): str(self.friendly_name),
@@ -78,14 +73,9 @@ class SSDPControlPoint:
 
         # Let the host know if we're listening for responses via TCP.
         if tcp_port is not None:
-            discover_headers |= {
+            headers |= {
                 str(TCP_PORT): str(tcp_port),
             }
             remote_host = Endpoint(remote_host.address, tcp_port)
 
-        headers = {
-            UNICAST_DISCOVER: discover_headers,
-        }
-        message = ExtendedHTTPRequest.for_url("SEARCH", address, headers)
-
-        return await self.client.request_udp(message, remote_host)
+        return await self.client.unicast_search(headers, remote_host)
