@@ -76,7 +76,7 @@ class HTTPResponder(ResourceCollection):
             "Date": request_time.strftime(TIME_FORMAT),
         }
 
-    async def respond(self, request: HTTPRequest, endpoint: Endpoint) -> Iterable[Serializable]:
+    async def respond(self, request: HTTPRequest, remote_endpoint: Endpoint, local_endpoint: Endpoint) -> Iterable[Serializable]:
         """Identifies the targeted resource and gets the responder to handle it.
 
         Manages error-handling and walks through the resource-identifying step,
@@ -119,7 +119,7 @@ class HTTPResponder(ResourceCollection):
                     responses = self.unsatisfiable(constraints)
 
                 # We can now execute the function referenced by the method.
-                return await self.successful(target, request, constraints)
+                return await self.successful(target, request, constraints, remote_endpoint, local_endpoint)
 
         # This might be a one-time iterable, so we'll generate a tuple of
         # responses so we can iterate over it multiple times.
@@ -165,7 +165,7 @@ class HTTPResponder(ResourceCollection):
         """Returns a response for any unknown methods."""
         return (HTTPResponse(HTTPStatus.METHOD_NOT_ALLOWED, self.default_headers()),)
 
-    async def successful(self, target: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]]]) -> Iterable[HTTPResponse]:
+    async def successful(self, target: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]]], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
         """Generates successful responses for the given request and constraints.
 
         Any responses which need access to the entire request are handled here,
@@ -189,7 +189,7 @@ class HTTPResponder(ResourceCollection):
                 if request.method not in self.accessor.methods:
                     return self.unknown_method()
                 else:
-                    return await self.accessor.access(target, request, constraints, self.default_headers())
+                    return await self.accessor.access(target, request, constraints, self.default_headers(), remote, local)
 
     def subcollections(self) -> Mapping[URI, "ResourceCollection"]:
         """Return a mapping of all resource collections this responder contains."""

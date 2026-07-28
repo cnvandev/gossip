@@ -6,6 +6,7 @@ from gossip.http.extension.constants import Scope, Strength
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
+from gossip.network.endpoint import Endpoint
 
 log = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class Extension(HTTPAccessor):
     def __init__(
         self,
         identifier: URI | str,
-        methods: Mapping[str, Callable[[ResourceCollection, URI, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str]], Awaitable[Iterable[HTTPResponse]]]] | None = None,
+        methods: Mapping[str, Callable[[ResourceCollection, URI, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str], Endpoint, Endpoint], Awaitable[Iterable[HTTPResponse]]]] | None = None,
         scope: Scope = Scope.END_TO_END,
     ):
         super().__init__(methods)
@@ -61,8 +62,8 @@ class Extension(HTTPAccessor):
         # Just return the headers that apply.
         return {key[2:]: value for key, value in request.headers.items() if key.startswith(namespace)}
 
-    async def access(self, resource: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], headers: Mapping[str, str]) -> Iterable[HTTPResponse]:
+    async def access(self, resource: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], headers: Mapping[str, str], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
         # Successful extension usage puts in this header, to indicate an
         # extension was used successfully.
         headers = dict(headers) | {"Ext": ""}
-        return await super().access(resource, request, constraints, headers)
+        return await super().access(resource, request, constraints, headers, remote, local)

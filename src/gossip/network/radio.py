@@ -3,9 +3,10 @@ import logging
 from asyncio import Server
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping
 from ipaddress import IPv4Address, IPv6Address
 from socket import IPPROTO_UDP
-from typing import Any, Awaitable, Callable, Coroutine, Generator, Mapping, Self
+from typing import Any, Self
 
 import netifaces
 from netifaces import AF_INET  # , AF_INET6
@@ -19,7 +20,7 @@ log = logging.getLogger(__name__)
 
 
 # These are the interfaces and address families supported by this radio.
-INTERFACES = ("en",)  # "lo")
+INTERFACES = ("en", "lo")
 ADDRESS_FAMILIES = (AF_INET,)  # AF_INET6)
 
 
@@ -75,10 +76,10 @@ class Radio:
     def from_netifaces(cls, interfaces: tuple[str, ...] = INTERFACES, address_families: tuple[int, ...] = ADDRESS_FAMILIES) -> Self:
         # First, we'll load all the interfaces and filter for supported prefixes
         interface_set = set(interfaces)
-        useful_interfaces = set(i for i in netifaces.interfaces() if i.rstrip("0123456789") in interface_set)
+        useful_interfaces = {i for i in netifaces.interfaces() if i.rstrip("0123456789") in interface_set}
 
         # We only want addressable interfaces for the address families we can
         # address on, IPv4 and IPv6 (but not link addresses).
         addresses = {interface: netifaces.ifaddresses(interface) for interface in useful_interfaces}
         addressable_interfaces = {interface: interface_addresses for interface, interface_addresses in addresses.items() if any(family in interface_addresses for family in address_families)}
-        return cls(tuple(Interface.from_netifaces(interface, address_families) for interface in addressable_interfaces.keys()))
+        return cls(tuple(Interface.from_netifaces(interface, address_families) for interface in addressable_interfaces))

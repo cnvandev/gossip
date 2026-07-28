@@ -1,17 +1,17 @@
 import asyncio
 import logging
-from typing import Iterable, Mapping
+from collections.abc import Iterable, Mapping
 
 from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPRequest, HTTPResponse
-from gossip.http.server import HTTPServer
 from gossip.http.resource import ResourceCollection
+from gossip.http.server import HTTPServer
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.network.prompter import Prompter
 from gossip.network.replier import Replier
 from gossip.network.serializer import Serializable
-from gossip.ssdp.headers import TCP_PORT
+from gossip.ssdp.headers import SEARCH_PORT, TCP_PORT
 from gossip.ssdp.responder import SSDPResponder
 from gossip.ssdp.uri import SSDP_HOST
 
@@ -50,7 +50,7 @@ class SSDPServer(HTTPServer):
         if not responder:
             # If we're given a UDP port, include it in the static headers.
             if udp_port != SSDP_HOST.port:
-                static_headers = {str(TCP_PORT): str(udp_port)}
+                static_headers = {str(SEARCH_PORT): str(udp_port)}
             else:
                 static_headers = None
 
@@ -64,16 +64,16 @@ class SSDPServer(HTTPServer):
 
         super().__init__(resources, replier, responder)
 
-    async def respond(self, request: HTTPRequest, endpoint: Endpoint) -> Iterable[Serializable]:
-        responses = await self.responder.respond(request, endpoint)
+    async def respond(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> Iterable[Serializable]:
+        responses = await self.responder.respond(request, remote, local)
 
         # If the response is for a request with a TCP port specified, we'll
         # respond out-of-band here.
         if port_constraint := request.headers.get(str(TCP_PORT), None):
             log.debug("Writing to TCP port %s", port_constraint)
-            destination = Endpoint(endpoint.address, int(port_constraint[0]))
+            destination = Endpoint(remote.address, int(port_constraint[0]))
             coroutines = (self.prompter.prompt_tcp(response, destination) for response in responses)
             await asyncio.gather(*coroutines)
-            return tuple()
+            return ()
         else:
             return responses

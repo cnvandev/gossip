@@ -3,10 +3,11 @@ import logging
 from asyncio import Server
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Mapping
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address
 from socket import IPPROTO_UDP
-from typing import Any, Awaitable, Callable, Coroutine, Generator, Mapping, Self
+from typing import Any, Self
 
 import netifaces
 
@@ -81,7 +82,6 @@ class Interface:
         address_string = str(group_address) if group_address is not None else None
 
         if factory is None:
-
             def interface_factory():
                 return DatagramCallbackProtocol(
                     callback,
@@ -96,7 +96,7 @@ class Interface:
             log.debug("Group listen from %s to %s on port %d", addresses[0], group_address, port)
             return await loop.create_datagram_endpoint(
                 factory,
-                local_addr=("0.0.0.0", port),
+                local_addr=(addresses[0], port),
                 proto=IPPROTO_UDP,
                 reuse_port=True,
                 allow_broadcast=True,
@@ -120,7 +120,7 @@ class Interface:
 
         # The order of the binding dictionary matters, we'll use that as the
         # preference order when choosing addresses.
-        bindings: dict[int, tuple[Binding, ...]] = dict()
+        bindings: dict[int, tuple[Binding, ...]] = {}
         for family in address_families:
             bindings[family] = tuple(Binding.from_ifaddresses(addresses) for addresses in ifaddresses[family])
 

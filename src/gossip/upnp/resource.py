@@ -10,21 +10,6 @@ from gossip.upnp.uri import ESCAPED_SCHEMA
 log = logging.getLogger(__name__)
 
 
-# {
-#     "Host": str,  # the host to send the request to
-#     "ST": SSDPTarget.parse,  # the service type to discover
-#     "MX": int,  # the maximum wait time in seconds
-#     "NLS": str,
-#     str(CPFN): str,  # the friendly name of the control point
-
-#     "NT": SSDPTarget.parse,  # The notification target
-#     "NTS": URI.parse,  # The notification subtype: `ssdp:alive`, `ssdp:update`, or `ssdp:byebye`.
-#     "USN": UniqueServiceName.parse,  # The USN of the notifier
-#     str(BOOT_ID): str,
-#     str(CONFIG_ID): str,
-# },
-
-
 class UPnPDevice(ResourceCollection):
     """A device that can be interaced with over UPnP."""
 

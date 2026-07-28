@@ -11,6 +11,7 @@ from gossip.http.predicate import RequestPredicate
 from gossip.http.responder import HTTPResponder
 from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
+from gossip.network.endpoint import Endpoint
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class ExtendedHTTPResponder(HTTPResponder):
         allowed_methods = set(map(str.upper, accessor_methods | extension_methods))
         return {"Allow": ", ".join(allowed_methods)}
 
-    async def successful(self, target: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]]]) -> Iterable[HTTPResponse]:
+    async def successful(self, target: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]]], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
         """Returns the successful response for the given request.
 
         Also does additional checks for the request to make sure it's requesting
@@ -94,6 +95,6 @@ class ExtendedHTTPResponder(HTTPResponder):
         # Reply with the extension, if supported.
         for extension in self.extensions.values():
             if request.method in extension.methods:
-                return await extension.access(target, request, constraints, self.default_headers())
+                return await extension.access(target, request, constraints, self.default_headers(), remote, local)
         else:
-            return await super().successful(target, request, constraints)
+            return await super().successful(target, request, constraints, remote, local)

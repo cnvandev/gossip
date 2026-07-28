@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.framework import Extension
@@ -12,7 +13,12 @@ log = logging.getLogger(__name__)
 
 
 class SSDPResponder(ExtendedHTTPResponder):
-    """A special type of HTTP responder that doesn't send error replies."""
+    """A special type of HTTP responder that doesn't send error replies.
+
+    RFC 2774 specifies no responses are given for i.e. 404s or authentication
+    failures. Since they're broadcast on the network, we avoid clogging up the
+    network with error responses.
+    """
 
     def __init__(
         self,
@@ -24,10 +30,10 @@ class SSDPResponder(ExtendedHTTPResponder):
         super().__init__(resources, extensions, accessor, static_headers)
 
     def unidentifiable(self, error: Exception | None = None) -> Iterable[HTTPResponse]:
-        return tuple()
+        return ()
 
     def unsatisfiable(self, constraints: Mapping[str, tuple[Any, Mapping[str, str]]]) -> Iterable[HTTPResponse]:
-        return tuple()
+        return ()
 
     def unknown_method(self) -> Iterable[HTTPResponse]:
-        return tuple()
+        return ()

@@ -1,6 +1,5 @@
 import logging
 import socket
-import struct
 from asyncio.protocols import DatagramProtocol
 from asyncio.transports import BaseTransport
 from typing import override
@@ -43,17 +42,11 @@ class MulticastDatagramProtocol(DatagramProtocol):
 
             if self.interface_address is not None:
                 log.debug("%s filtering for interface %s", self.__class__.__name__, self.interface_address)
-                # IP_ADD_MEMBERSHIP expects a 4-byte group address and a 4-byte interface address
-                mreq = struct.pack("4s4s", group, socket.inet_aton(self.interface_address))
-
-                # Tells the kernel: "Send all multicast traffic for this socket via 192.168.0.114"
-                # interface = socket.inet_aton(str(self.interface_address))
-                # sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, interface)
+                interface = socket.inet_aton(self.interface_address)
             else:
                 log.debug("%s not filtering by interface", self.__class__.__name__)
-                # Fallback to INADDR_ANY if no specific interface address is provided
-                mreq = struct.pack("4sL", group, socket.INADDR_ANY)
-            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                interface = bytes(socket.INADDR_ANY)
+            sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + interface)
 
             # Allow loopback multicast packets to be received, so we can work
             # without any network connection.

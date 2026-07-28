@@ -23,13 +23,13 @@ class Replier[Prompt: Serializable]:
     """
 
     radio: Radio
-    callback: Callable[[Prompt, Endpoint], Awaitable[Iterable[Serializable]]]
+    callback: Callable[[Prompt, Endpoint, Endpoint], Awaitable[Iterable[Serializable]]]
     tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]]
     udp: Mapping[int | Endpoint | None, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]]
 
     def __init__(
         self,
-        callback: Callable[[Prompt, Endpoint], Awaitable[Iterable[Serializable]]],
+        callback: Callable[[Prompt, Endpoint, Endpoint], Awaitable[Iterable[Serializable]]],
         tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]] | None = None,
         udp: Mapping[int | Endpoint | None, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]] | None = None,
         radio: Radio | None = None,
@@ -52,20 +52,23 @@ class Replier[Prompt: Serializable]:
 
             async def tcp_callback(tcp_reader: StreamReader, tcp_writer: StreamWriter) -> None:
                 remote_address = tcp_writer.get_extra_info("peername")
-                endpoint = Endpoint.for_addr(remote_address)
-                log.debug("Received prompt from TCP %s", endpoint)
+                remote_endpoint = Endpoint.for_addr(remote_address)
+                log.debug("Received prompt from TCP %s", remote_endpoint)
 
                 prompt = await tcp_deserializer(tcp_reader)
-                log.debug("Deserialized %r from TCP %s", prompt, endpoint)
+                log.debug("Deserialized %r from TCP %s", prompt, remote_endpoint)
                 if prompt is None:
                     return
 
-                replies = await self.callback(prompt, endpoint)
+                local_address = tcp_writer.get_extra_info('sockname')
+                local_endpoint = Endpoint.for_addr(local_address)
+
+                replies = await self.callback(prompt, remote_endpoint, local_endpoint)
                 for reply in replies:
-                    log.debug("Writing reply %r to TCP %s", reply, endpoint)
+                    log.debug("Writing reply %r to TCP %s", reply, remote_endpoint)
                     await reply.write_to(tcp_writer)
                     await tcp_writer.drain()
-                log.debug("Done, closing connection to TCP %s.", endpoint)
+                log.debug("Done, closing connection to TCP %s.", remote_endpoint)
                 tcp_writer.close()
                 await tcp_writer.wait_closed()
 
@@ -75,21 +78,21 @@ class Replier[Prompt: Serializable]:
         # Set up our UDP listeners
         for port_or_endpoint, udp_deserializer in self.udp.items():
 
-            async def udp_callback(datagram: bytes, sender: Endpoint, transport: DatagramTransport) -> None:
+            async def udp_callback(datagram: bytes, remote_endpoint: Endpoint, transport: DatagramTransport) -> None:
                 local_address = transport.get_extra_info("sockname")
                 local_endpoint = Endpoint.for_addr(local_address)
-                log.debug("Received prompt from %s as UDP %s", sender, local_endpoint)
+                log.debug("Received prompt from %s as UDP %s", remote_endpoint, local_endpoint)
 
-                prompt = await udp_deserializer((datagram, sender))
+                prompt = await udp_deserializer((datagram, remote_endpoint))
                 log.debug("Deserialized %r as UDP %s", prompt, local_endpoint)
                 if prompt is None:
                     return  # No prompt found, skip this callback
 
-                replies = tuple(await self.callback(prompt, local_endpoint))
+                replies = tuple(await self.callback(prompt, remote_endpoint, local_endpoint))
                 for reply in replies:
                     log.debug("Writing reply %r as UDP %s", reply, local_endpoint)
                     message = bytes(reply)
-                    transport.sendto(message, (str(sender.address), sender.port))
+                    transport.sendto(message, (str(remote_endpoint.address), remote_endpoint.port))
 
                 log.debug("Done, closing connection to UDP %s.", local_endpoint)
 

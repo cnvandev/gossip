@@ -101,9 +101,9 @@ class ExtendedHTTPClient(HTTPClient):
     async def broadcast_request(self,
         method: str, uri: URI, headers: Mapping[str, str] | None = None,
         extended_headers: Mapping[Strength, Mapping[Extension, Mapping[str, str]]] | None = None,
-        max_wait: int = 5
+        tcp_port: int | None = None, max_wait: int = 5
     ) -> Stream[HTTPResponse]:
         """Make an extended HTTP request, with the extended headers."""
         method, headers = self.extend(method, headers, extended_headers)
         request, destination = self.prepare(method, uri, headers)
-        return await self.prompter.broadcast_prompt(request, destination, max_wait=max_wait)
+        return await self.prompter.broadcast_prompt(request, destination, tcp_port=tcp_port, max_wait=max_wait)
