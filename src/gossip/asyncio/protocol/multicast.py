@@ -2,6 +2,7 @@ import logging
 import socket
 from asyncio.protocols import DatagramProtocol
 from asyncio.transports import BaseTransport
+from ipaddress import ip_address
 from typing import override
 
 log = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ class MulticastDatagramProtocol(DatagramProtocol):
         # If non-`None`, we'll join under this interface address to filter only
         # for packets for a specific interface on the machine.
         self.interface_address = interface_address
+
+        # For later convenience
+        self.parsed_address = ip_address(interface_address) if interface_address else None
 
     @override
     def connection_made(self, transport: BaseTransport):

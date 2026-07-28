@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from http import HTTPMethod, HTTPStatus
-from typing import Any, Awaitable, Callable, Iterable, Mapping
+from typing import Any
 
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.resource import ResourceCollection
@@ -19,7 +20,7 @@ class HTTPAccessor:
     methods: Mapping[str, Callable[[ResourceCollection, HTTPRequest, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str], Endpoint, Endpoint], Awaitable[Iterable[HTTPResponse]]]]
 
     def __init__(self, methods: Mapping[str, Callable[[ResourceCollection, HTTPRequest, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str], Endpoint, Endpoint], Awaitable[Iterable[HTTPResponse]]]] | None = None):
-        self.methods = dict(methods or dict()) | {
+        self.methods = dict(methods or {}) | {
             HTTPMethod.GET: self.get,
             HTTPMethod.PUT: self.put,
             HTTPMethod.PATCH: self.patch,

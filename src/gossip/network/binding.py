@@ -4,10 +4,11 @@ import logging
 from asyncio import Server
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 from socket import IPPROTO_UDP
-from typing import Any, Awaitable, Callable, Coroutine, Mapping, Self
+from typing import Any, Self
 
 from gossip.asyncio.protocol.callback import DatagramCallbackProtocol
 from gossip.asyncio.protocol.reply import DatagramReplyProtocol
@@ -82,7 +83,7 @@ class Binding:
             allow_broadcast=True,
         )
 
-    async def udp_listen(self, callback: Callable[[bytes, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int, group_address: IPv4Address | IPv6Address | None = None, factory: Callable[[], DatagramCallbackProtocol] | None = None) -> tuple[DatagramTransport, DatagramCallbackProtocol]:
+    async def udp_listen(self, callback: Callable[[bytes, IPv4Address | IPv6Address | None, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int, group_address: IPv4Address | IPv6Address | None = None, factory: Callable[[], DatagramCallbackProtocol] | None = None) -> tuple[DatagramTransport, DatagramCallbackProtocol]:
         """Listen for UDP messages on this binding."""
         loop = asyncio.get_running_loop()
 
@@ -99,9 +100,14 @@ class Binding:
 
             factory = binding_factory
 
+        if group_address is not None:
+            local_addr = (str(group_address), port)
+        else:
+            local_addr = (str(self.address), port) if port is not None else str(self.address)
+
         return await loop.create_datagram_endpoint(
             factory,
-            local_addr=(str(self.address), port) if port is not None else str(self.address),
+            local_addr=local_addr,
             proto=IPPROTO_UDP,
             reuse_port=True,
             allow_broadcast=True,
@@ -109,7 +115,7 @@ class Binding:
 
     @classmethod
     def from_ifaddresses(cls, address_dict: Mapping[str, str]) -> Self:
-        kwargs = dict()
+        kwargs = {}
         for arg in ("addr", "peer", "broadcast"):
             if arg in address_dict:
                 kwargs[arg] = ipaddress.ip_address(address_dict.get(arg, ""))

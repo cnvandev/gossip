@@ -2,7 +2,8 @@ import asyncio
 import logging
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
-from typing import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from ipaddress import IPv4Address, IPv6Address
 
 from gossip.network.endpoint import Endpoint
 from gossip.network.radio import Radio
@@ -44,8 +45,8 @@ class Replier[Prompt: Serializable]:
 
     async def __aenter__(self):
         """Start listening for prompts."""
-        listeners = tuple()
-        port_strings = tuple()
+        listeners = ()
+        port_strings = ()
 
         # Set up our TCP listeners
         for port, tcp_deserializer in self.tcp.items():
@@ -78,23 +79,42 @@ class Replier[Prompt: Serializable]:
         # Set up our UDP listeners
         for port_or_endpoint, udp_deserializer in self.udp.items():
 
-            async def udp_callback(datagram: bytes, remote_endpoint: Endpoint, transport: DatagramTransport) -> None:
-                local_address = transport.get_extra_info("sockname")
-                local_endpoint = Endpoint.for_addr(local_address)
-                log.debug("Received prompt from %s as UDP %s", remote_endpoint, local_endpoint)
+            async def udp_callback(datagram: bytes, local_address: IPv4Address | IPv6Address | None, remote_endpoint: Endpoint, transport: DatagramTransport) -> None:
+                bound_address = transport.get_extra_info("sockname")
+                bound_endpoint = Endpoint.for_addr(bound_address)
+                if local_address is None:
+                    log.debug("Received prompt from %s as UDP %s", remote_endpoint, bound_endpoint)
+                    prompt = await udp_deserializer((datagram, remote_endpoint))
+                    log.debug("Deserialized %r as UDP %s", prompt, bound_endpoint)
+                    if prompt is None:
+                        return  # No prompt found, skip this callback
 
-                prompt = await udp_deserializer((datagram, remote_endpoint))
-                log.debug("Deserialized %r as UDP %s", prompt, local_endpoint)
-                if prompt is None:
-                    return  # No prompt found, skip this callback
+                    replies = tuple(await self.callback(prompt, remote_endpoint, bound_endpoint))
+                    for reply in replies:
+                        log.debug("Writing reply %r as UDP %s", reply, bound_endpoint)
+                        message = bytes(reply)
+                        reply_transport, _ = await self.radio.udp_send(remote_endpoint)
+                        reply_transport.sendto(message)
+                        reply_transport.close()
+                    log.debug("Done, closing connection to UDP %s.", local_address)
+                else:
+                    local_endpoint = Endpoint(local_address, bound_endpoint.port)
+                    log.debug("Received prompt from %s as UDP %s (on channel %s)", remote_endpoint, local_address, bound_endpoint)
 
-                replies = tuple(await self.callback(prompt, remote_endpoint, local_endpoint))
-                for reply in replies:
-                    log.debug("Writing reply %r as UDP %s", reply, local_endpoint)
-                    message = bytes(reply)
-                    transport.sendto(message, (str(remote_endpoint.address), remote_endpoint.port))
+                    prompt = await udp_deserializer((datagram, remote_endpoint))
+                    log.debug("Deserialized %r from %s as UDP %s (on channel %s)", prompt, remote_endpoint, local_address, bound_endpoint)
+                    if prompt is None:
+                        return  # No prompt found, skip this callback
 
-                log.debug("Done, closing connection to UDP %s.", local_endpoint)
+                    replies = tuple(await self.callback(prompt, remote_endpoint, local_endpoint))
+                    for reply in replies:
+                        log.debug("Writing reply %r as UDP %s (on channel %s)", reply, local_address, bound_endpoint)
+                        message = bytes(reply)
+                        reply_transport, _ = await self.radio.udp_send(remote_endpoint)
+                        reply_transport.sendto(message)
+                        reply_transport.close()
+
+                log.debug("Done, closing connection to UDP %s.", local_address)
 
             # If we're given an endpoint (IP & port), we're listening on a
             # multicast socket with that group address. If it's an integer, we

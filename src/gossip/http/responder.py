@@ -51,7 +51,7 @@ class HTTPResponder(ResourceCollection):
 
         # Default headers for all responses includes the server information.
         if static_headers is None:
-            static_headers = dict()
+            static_headers = {}
         static_headers["Server"] = str(ProductStack.gossip())
         self.static_headers = static_headers
 
@@ -175,7 +175,7 @@ class HTTPResponder(ResourceCollection):
         match request.method:
             case HTTPMethod.CONNECT:
                 # TODO: Implement this, I forget how connect works.
-                return tuple()
+                return ()
             case HTTPMethod.TRACE:
                 # Spit the request back to the client, as it was received.
                 body = bytes(request)

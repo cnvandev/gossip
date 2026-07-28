@@ -1,12 +1,12 @@
 import logging
 from collections import Counter
+from collections.abc import Mapping
 from ipaddress import IPv4Address, IPv6Address
-from typing import Mapping
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest
-from gossip.http.responder import HTTPResponder
 from gossip.http.resource import ResourceCollection
+from gossip.http.responder import HTTPResponder
 from gossip.internet.uri import URI
 from gossip.network.replier import Replier
 
@@ -43,7 +43,7 @@ class HTTPServer:
         self.responder = responder
 
         # For convenience, we'll display the summary when the server starts.
-        domains = Counter(uri.netloc or "*" for uri in resources.keys())
+        domains = Counter(uri.netloc or "*" for uri in resources)
         ip_addresses = Counter(self.replier.radio.addresses())
         self.summary = {**domains, **{str(ip): count for ip, count in ip_addresses.items()}}
 

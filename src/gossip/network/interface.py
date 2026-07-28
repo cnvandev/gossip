@@ -71,7 +71,7 @@ class Interface:
         log.debug("Starting broadcast from %s on interface `%s`.", sorted_addresses[0].address, self.name)
         return await sorted_addresses[0].udp_broadcast(group_address, port=port)
 
-    async def udp_listen(self, callback: Callable[[bytes, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int, group_address: IPv4Address | IPv6Address | None = None, factory: Callable[[], DatagramCallbackProtocol] | None = None) -> tuple[DatagramTransport, DatagramCallbackProtocol]:
+    async def udp_listen(self, callback: Callable[[bytes, IPv4Address | IPv6Address | None, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int, group_address: IPv4Address | IPv6Address | None = None, factory: Callable[[], DatagramCallbackProtocol] | None = None) -> tuple[DatagramTransport, DatagramCallbackProtocol]:
         loop = asyncio.get_running_loop()
 
         # `create_datagram_endpoint()` doesn't take a list of addresses, but we
@@ -96,7 +96,7 @@ class Interface:
             log.debug("Group listen from %s to %s on port %d", addresses[0], group_address, port)
             return await loop.create_datagram_endpoint(
                 factory,
-                local_addr=(addresses[0], port),
+                local_addr=(str(group_address), port),
                 proto=IPPROTO_UDP,
                 reuse_port=True,
                 allow_broadcast=True,
