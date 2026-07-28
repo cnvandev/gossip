@@ -1,7 +1,7 @@
 import logging
 from collections import UserDict
-from collections.abc import Buffer
-from typing import Any, Mapping
+from collections.abc import Buffer, Mapping
+from typing import Any
 
 from gossip.http.predicate import RequestPredicate
 from gossip.internet.uri import URI
@@ -34,7 +34,7 @@ class ResourceCollection(UserDict[str, dict[str, str]]):
 
     def __init__(self, predicates: Mapping[str, RequestPredicate] | None = None, data: dict[str, dict[str, str]] | None = None):
         if predicates is None:
-            predicates = dict()
+            predicates = {}
 
         self.predicates = predicates
         super().__init__(data)

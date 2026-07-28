@@ -1,8 +1,8 @@
 import hashlib
 import logging
 from collections import deque
+from collections.abc import MutableMapping
 from dataclasses import dataclass, field
-from typing import MutableMapping
 
 from gossip.internet.mime import MediaType
 from gossip.internet.uri import URI

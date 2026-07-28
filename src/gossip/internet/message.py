@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from asyncio.streams import StreamReader, StreamWriter
 from collections.abc import Buffer
@@ -53,13 +54,16 @@ class InternetMessage(Serializable):
             start_line = " ".join(map(str, self.start_line)) + CRLF
             output.extend(start_line.encode())
 
-        # Trailing empty string gives us a trailing newline.
-        header_items = (f"{key}: {value}" for key, value in self.headers.items())
-        headers_str = CRLF.join(tuple(header_items) + ("",))
+        headers_dict = dict(self.headers)
+        if self.body is not None and "Content-Length" not in headers_dict:
+            headers_dict["Content-Length"] = str(len(self.body))
+
+        header_items = (f"{key}: {value}" for key, value in headers_dict.items())
+        headers_str = CRLF.join(tuple(header_items) + ("", ""))
         output.extend(headers_str.encode())
 
-        # We explicitly don't send a body or trailers, since this is mostly
-        # intended for debugging. Use write_to for the real deal.
+        if self.body is not None:
+            output.extend(memoryview(self.body))
 
         return bytes(output)
 
@@ -70,16 +74,13 @@ class InternetMessage(Serializable):
             start_line = " ".join(map(str, self.start_line)) + CRLF
             writer.write(start_line.encode())
 
-        # Send headers & drain
-        # `Host` is required for HTTP/1.1 requests, so we include
-        # it unconditionally.
-        host_header = self.headers["Host"]
-        if host_header is not None:
-            writer.write(f"Host: {host_header}{CRLF}".encode())
+        headers_dict = dict(self.headers)
+        if self.body is not None and "Content-Length" not in headers_dict:
+            headers_dict["Content-Length"] = str(len(self.body))
 
-        # Trailing empty string gives us a trailing newline.
-        header_items = (f"{key}: {value}" for key, value in self.headers.items())
-        headers_str = CRLF.join(tuple(header_items) + ("",))
+        # Trailing empty strings give us the double newline separating headers from body.
+        header_items = (f"{key}: {value}" for key, value in headers_dict.items())
+        headers_str = CRLF.join(tuple(header_items) + ("", ""))
         writer.write(headers_str.encode())
         await writer.drain()
 
@@ -90,14 +91,10 @@ class InternetMessage(Serializable):
 
         # Send trailers, if we have any.
         if self.trailers:
-            # Trailing empty string gives us a trailing newline.
             trailer_items = (f"{key}: {value}" for key, value in self.trailers.items())
-            trailers_str = CRLF.join(tuple(trailer_items) + ("",))
+            trailers_str = CRLF.join(tuple(trailer_items) + ("", ""))
             writer.write(trailers_str.encode())
             await writer.drain()
-
-        writer.write(CRLF.encode())
-        await writer.drain()
 
     @classmethod
     async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint], body_reader: Callable[[StreamReader], Awaitable[Buffer]] = read_into_memory) -> Self | None:
@@ -128,7 +125,20 @@ class InternetMessage(Serializable):
 
             # Read the body into a buffer of some kind, if we have one.
             if isinstance(reader, StreamReader):
-                body = await body_reader(reader)
+                content_length_str = headers.get("Content-Length")
+                if content_length_str is not None:
+                    try:
+                        content_length = int(content_length_str)
+                        if content_length > 0:
+                            body = await reader.readexactly(content_length)
+                        else:
+                            body = b""
+                    except (ValueError, asyncio.IncompleteReadError):
+                        body = b""
+                elif body_reader is not read_into_memory:
+                    body = await body_reader(reader)
+                else:
+                    body = b""
             else:
                 body = b""
 

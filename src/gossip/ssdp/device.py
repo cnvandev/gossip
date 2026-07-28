@@ -16,7 +16,7 @@ class SSDPDevice:
     server: SSDPServer
     client: SSDPClient
 
-    def __init__(self, upnp_device: UPnPDevice, path: str = "/device") -> None:
+    def __init__(self, upnp_device: UPnPDevice, path: str = "/device.xml") -> None:
         self.upnp_device = upnp_device
         self.server = SSDPServer({URI.parse(path): self.upnp_device}, (DISCOVER,))
         self.client = SSDPClient()

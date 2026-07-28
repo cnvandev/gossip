@@ -7,6 +7,7 @@ from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 
 SSDP_DOMAIN = "schemas.upnp.org"
+MULTISCREEN_DOMAIN = "dial.multiscreen.org"
 UPNP_DOMAIN = "upnp.org"
 
 SSDP_IP_ADDRESS = IPv4Address("239.255.255.250")

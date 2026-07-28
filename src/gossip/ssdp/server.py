@@ -45,7 +45,10 @@ class SSDPServer(HTTPServer):
                 SSDP_HOST: HTTPRequest.read_from,
                 udp_port: HTTPRequest.read_from,
             }
-            replier = Replier(callback=self.respond, udp=udp_ports)
+            tcp_ports = {
+                udp_port: HTTPRequest.read_from,
+            }
+            replier = Replier(callback=self.respond, udp=udp_ports, tcp=tcp_ports)
 
         if not responder:
             # If we're given a UDP port, include it in the static headers.

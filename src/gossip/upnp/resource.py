@@ -1,7 +1,10 @@
 import logging
+from collections.abc import Mapping
+from typing import Any
 
 from gossip.http.predicate import StringPredicate
 from gossip.http.resource import ResourceCollection
+from gossip.internet.uri import URI
 from gossip.ssdp.headers import BOOT_ID, CONFIG_ID
 from gossip.ssdp.uri import SSDPTarget
 from gossip.upnp.model.descriptor import Device, DeviceSpec, Version
@@ -50,9 +53,16 @@ class UPnPDevice(ResourceCollection):
     def __repr__(self):
         return f'UPnPDevice("{self.compact_type()}", "{self.device.friendlyName}", {self.device.UDN})'
 
-    def get_spec(self) -> DeviceSpec:
+    def get_spec(self, url_base: URI | None) -> DeviceSpec:
         return DeviceSpec(
             specVersion=Version(2, 0),
             device=self.device,
             configId=str(self.device.config_id()),
+            URLBase=url_base,
         )
+
+    async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[Any, Mapping[str, str]]:
+        xml = self.get_spec(url_base=exact_uri).to_xml()
+        return xml.encode("utf-8"), {
+            "Content-Type": "application/xml",
+        }
