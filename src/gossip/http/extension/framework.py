@@ -1,5 +1,6 @@
 import logging
-from typing import Any, Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.constants import Scope, Strength

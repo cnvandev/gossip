@@ -1,8 +1,9 @@
 import logging
+from collections.abc import Mapping
 from ipaddress import ip_address
-from typing import Mapping
 
-from gossip.dns import resolve_ip
+# from gossip.dns.client import resolve_ip
+from gossip.dns.client import DNSClient
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
@@ -23,29 +24,38 @@ class HTTPClient:
     """The `ProductStack` identifying this client's agent."""
     agent: ProductStack
 
-    def __init__(self, prompter: Prompter[HTTPResponse] | None = None, agent: ProductStack | None = None, radio: Radio | None = None):
+    """A DNS client to use to resolve domain names & find IP addresses."""
+    dns: DNSClient
+
+    def __init__(self, prompter: Prompter[HTTPResponse] | None = None, agent: ProductStack | None = None, dns: DNSClient | None = None, radio: Radio | None = None):
         # Default prompter deserializes `HTTPResponse`s.
         if prompter is None:
-            self.prompter = Prompter(HTTPResponse.read_from, radio=radio)
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+        self.prompter = prompter
 
-        self.agent = agent or ProductStack.gossip()
+        if dns is None:
+            dns = DNSClient(radio=radio)
+        self.dns = dns
+
+        if agent is None:
+            agent = ProductStack.gossip()
+        self.agent = agent
 
     def default_headers(self):
         return {
             "User-Agent": str(self.agent),
         }
 
-    def prepare(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[HTTPRequest, Endpoint]:
+    async def prepare(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> tuple[HTTPRequest, Endpoint]:
         if not headers:
-            headers = dict()
+            headers = {}
         headers = dict(headers) | {"Host": str(uri.netloc)} | self.default_headers()
 
         if uri.hostname is not None:
             try:
                 address = ip_address(uri.hostname)
             except ValueError:
-                ip_addresses = resolve_ip(uri.hostname)
-                address = ip_addresses[0]
+                address = await self.dns.resolve_ip(uri.hostname)
         else:
             address = ip_address("127.0.0.1")
         destination = Endpoint(address, uri.port or 80)
@@ -54,7 +64,7 @@ class HTTPClient:
         return HTTPRequest(method, request_uri, headers), destination
 
     async def request(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        request, destination = self.prepare(method, uri, headers)
+        request, destination = await self.prepare(method, uri, headers)
         return await self.prompter.prompt_tcp(request, destination)
 
     async def get(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:

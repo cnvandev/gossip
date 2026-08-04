@@ -1,15 +1,15 @@
 import logging
-
+from collections.abc import Iterable, Mapping
 from http import HTTPStatus
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.predicate import RequestPredicate
-from gossip.http.responder import HTTPResponder
 from gossip.http.resource import ResourceCollection
+from gossip.http.responder import HTTPResponder
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 
@@ -35,14 +35,14 @@ class ExtendedHTTPResponder(HTTPResponder):
     ):
         super().__init__(resources, accessor, static_headers, predicates)
         if extensions is None:
-            extensions = dict()
+            extensions = {}
         self.extensions = {extension.identifier: extension for extension in extensions}
         log.debug(f"Initializing with extensions: {tuple(map(str, self.extensions.keys()))}")
 
     async def options(self, uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> Mapping[str, str]:
         """Returns key-value pairs describing how this responder communicates."""
         accessor_methods = set(self.accessor.methods.keys())
-        extension_methods = {method for extension in self.extensions.values() for method in extension.methods.keys()}
+        extension_methods = {method for extension in self.extensions.values() for method in extension.methods}
         allowed_methods = set(map(str.upper, accessor_methods | extension_methods))
         return {"Allow": ", ".join(allowed_methods)}
 
@@ -96,5 +96,6 @@ class ExtendedHTTPResponder(HTTPResponder):
         for extension in self.extensions.values():
             if request.method in extension.methods:
                 return await extension.access(target, request, constraints, self.default_headers(), remote, local)
+                break
         else:
             return await super().successful(target, request, constraints, remote, local)

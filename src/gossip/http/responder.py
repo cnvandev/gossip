@@ -1,16 +1,17 @@
 import logging
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from http import HTTPMethod, HTTPStatus
 from ipaddress import ip_address
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest, HTTPResponse
+from gossip.http.predicate import RequestPredicate
+from gossip.http.resource import ResourceCollection
 from gossip.internet.mime import MediaType
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
-from gossip.http.resource import ResourceCollection
-from gossip.http.predicate import RequestPredicate
 from gossip.network.endpoint import Endpoint
 from gossip.network.serializer import Serializable
 

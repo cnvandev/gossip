@@ -4,7 +4,7 @@ from asyncio import Future
 from asyncio.queues import Queue
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
-from typing import Awaitable, Callable
+from collections.abc import Awaitable, Callable
 
 from aiostream import stream
 

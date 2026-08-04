@@ -1,9 +1,9 @@
 import logging
-from asyncio.streams import StreamReader, StreamWriter
-from collections.abc import Buffer
+from asyncio.streams import StreamReader
+from collections.abc import Awaitable, Buffer, Callable, Iterable, Mapping
 from functools import cache
 from http import HTTPStatus
-from typing import Awaitable, Callable, Iterable, Mapping, Self
+from typing import Self
 
 from gossip.internet.message import InternetMessage, read_into_memory
 from gossip.internet.product import Product
@@ -50,7 +50,7 @@ class HTTPRequest(HTTPMessage):
     """
     target: URI
 
-    def __init__(self, method: str, target: URI = URI.parse("*"), headers: Mapping[str, str] | None = None, body: Buffer | None = None, protocol: Product = HTTP_PROTOCOL):
+    def __init__(self, method: str, target: URI, headers: Mapping[str, str] | None = None, body: Buffer | None = None, protocol: Product = HTTP_PROTOCOL):
         self.protocol = protocol
         self.method = method
         self.target = target
@@ -59,16 +59,6 @@ class HTTPRequest(HTTPMessage):
         # and the writer will fill in the protocol for us.
         start_line = tuple(map(str, (self.method.upper(), self.target)))
         super().__init__(start_line, headers, body)
-
-    async def write_to(self, writer: StreamWriter):
-        """Write this message to a `StreamWriter`."""
-        start_line = tuple(self.start_line) + (self.protocol,)
-        message = InternetMessage(
-            map(str, start_line),
-            self.headers,
-            self.body,
-        )
-        await message.write_to(writer)
 
     def __bytes__(self) -> bytes:
         """Convert to `bytes` for serialization."""
@@ -121,16 +111,6 @@ class HTTPResponse(HTTPMessage):
 
         start_line = tuple(map(str, (self.status.value, self.status.phrase)))
         super().__init__(start_line, headers, body)
-
-    async def write_to(self, writer: StreamWriter):
-        """Write this message to a `StreamWriter`."""
-        start_line = (self.protocol,) + tuple(self.start_line)
-        message = InternetMessage(
-            map(str, start_line),
-            self.headers,
-            self.body,
-        )
-        await message.write_to(writer)
 
     def __bytes__(self) -> bytes:
         """Convert to `bytes` for serialization."""

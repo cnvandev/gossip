@@ -1,11 +1,11 @@
 import random
 from collections import defaultdict
-from typing import Mapping
+from collections.abc import Mapping
 
 from aiostream import Stream
 
 from gossip.http.client import HTTPClient
-from gossip.http.extension.constants import Strength, Scope
+from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPResponse
 from gossip.internet.uri import URI
@@ -16,13 +16,13 @@ class ExtendedHTTPClient(HTTPClient):
 
     def extend(self, method: str, headers: Mapping[str, str] | None = None, extended_headers: Mapping[Strength, Mapping[Extension, Mapping[str, str]]] | None = None) -> tuple[str, Mapping[str, str]]:
         if headers is None:
-            headers = dict()
+            headers = {}
         else:
             # Make it mutable
             headers = dict(headers)
 
         if extended_headers is None:
-            extended_headers = dict()
+            extended_headers = {}
 
         # If there are any hop-by-hop headers, we'll put them in the Connection header.
         connection = headers.pop("Connection", "")
@@ -86,7 +86,7 @@ class ExtendedHTTPClient(HTTPClient):
     ) -> HTTPResponse | None:
         """Make an extended HTTP request, with the extended headers."""
         method, headers = self.extend(method, headers, extended_headers)
-        request, destination = self.prepare(method, uri, headers)
+        request, destination = await self.prepare(method, uri, headers)
         return await self.prompter.prompt_udp(request, destination)
 
     async def broadcast(self,
@@ -95,7 +95,7 @@ class ExtendedHTTPClient(HTTPClient):
     ) -> None:
         """Make an extended HTTP request, with the extended headers."""
         method, headers = self.extend(method, headers, extended_headers)
-        request, destination = self.prepare(method, uri, headers)
+        request, destination = await self.prepare(method, uri, headers)
         return await self.prompter.broadcast(request, destination)
 
     async def broadcast_request(self,
@@ -105,5 +105,5 @@ class ExtendedHTTPClient(HTTPClient):
     ) -> Stream[HTTPResponse]:
         """Make an extended HTTP request, with the extended headers."""
         method, headers = self.extend(method, headers, extended_headers)
-        request, destination = self.prepare(method, uri, headers)
+        request, destination = await self.prepare(method, uri, headers)
         return await self.prompter.broadcast_prompt(request, destination, tcp_port=tcp_port, max_wait=max_wait)
