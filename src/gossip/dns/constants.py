@@ -137,3 +137,29 @@ class RecordClass(IntEnum):
     HS = 4  # Hesiod
     NONE = 254 # None (for deleting updates)
     ANY = 255 # Any (for updates)
+
+
+class OpCode(IntEnum):
+    """DNS operation codes."""
+    QUERY = 0 # Query
+    IQUERY = 1 # Inverse Query (obsolete)
+    STATUS = 2 # Status
+    NOTIFY = 4 # Notify
+    UPDATE = 5 # Update
+    DSO = 6 # DNSSEC Operations
+
+
+class ResponseCode(IntEnum):
+    """DNS response codes."""
+    NO_ERROR = 0 # The request completed successfully.
+    FORM_ERROR = 1 # The request could not be understood by the server.
+    SERVER_FAILURE = 2 # The server encountered an error while processing the request.
+    NAME_ERROR = 3 # The domain name does not exist.
+    NOT_IMPLEMENTED = 4 # The server does not support the requested operation.
+    REFUSED = 5 # The server refused to process the request.
+    YXDOMAIN = 6 # Name exists when it should not
+    YXRRSET = 7 # RRset exists when it should not
+    NXRRSET = 8 # RRset does not exist when it should
+    NOTAUTH = 9 # Server not authoritative for zone
+    NOTZONE = 10 # Name not in zone
+    BADVERS = 16 # Bad version

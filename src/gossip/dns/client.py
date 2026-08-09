@@ -3,9 +3,10 @@ import logging
 import random
 import sys
 from collections.abc import Sequence
+from datetime import timedelta
 from ipaddress import IPv4Address, IPv6Address
 
-from gossip.dns.constants import ROOT_SERVERS
+from gossip.dns.constants import ROOT_SERVERS, RecordClass, ResponseCode
 from gossip.dns.message import DNSMessage, RecordType
 from gossip.network.endpoint import Endpoint
 from gossip.network.prompter import Prompter
@@ -17,11 +18,12 @@ log = logging.getLogger(__name__)
 class DNSClient:
     """A client for looking up IP addresses from domain names using DNS."""
 
+    """The prompter which creates connections to DNS servers & sends mesages."""
     prompter: Prompter[DNSMessage]
 
     def __init__(self, prompter: Prompter[DNSMessage] | None = None, radio: Radio | None = None):
         if prompter is None:
-            prompter = self.prompter = Prompter(DNSMessage.read_from)
+            prompter = self.prompter = Prompter(DNSMessage.read_from, radio=radio)
         self.prompter = prompter
 
     async def resolve_ip(self, domain: str, qtype: RecordType = RecordType.A) -> IPv4Address | IPv6Address:
@@ -30,65 +32,115 @@ class DNSClient:
             raise ValueError(f"No IP retrievable for {domain}")
         else:
             ip_addresses = tuple(filter(None, (answer.decode_ip() for answer in response.answers)))
-            return random.choice(ip_addresses)
+            if ip_addresses:
+                return random.choice(ip_addresses)
 
-    async def query(self, domain: str, qtype: RecordType = RecordType.A, recursive: bool = False, authorities: Sequence[IPv4Address | IPv6Address] | None = None) -> DNSMessage | None:
-        # TODO: break this up into authority-finding and record-finding.
-        if authorities is None:
-            authorities = tuple(ROOT_SERVERS.values())
-        authority = random.choice(authorities)
-        log.debug("Chosen authority: %s", authority)
-        message = DNSMessage.query(domain, qtype, recursive=recursive)
+            # Follow CNAMEs if present
+            cnames = tuple(filter(None, (record.decode_domain() for record in response.answers if record.rtype == RecordType.CNAME)))
+            if cnames:
+                return await self.resolve_ip(random.choice(cnames), qtype)
+
+            raise ValueError(f"No IP retrievable for {domain}")
+
+    async def nameserver(self, domain: str, roots: Sequence[IPv4Address | IPv6Address] | None = None) -> IPv4Address | IPv6Address | None:
+        """Gets the IP addresses for the authoritative nameservers for a domain."""
+        if roots is None:
+            roots = tuple(ROOT_SERVERS.values())
+        authority = random.choice(roots)
         root_endpoint = Endpoint(authority, 53)
-        response = await self.prompter.prompt_udp(message, root_endpoint)
 
+        request = DNSMessage.query(domain, RecordType.A)
+        response = await self.prompter.prompt_udp(request, root_endpoint)
         if response is not None:
-            for answer in response.answers:
-                log.debug("Answer: %r", answer)
-            for authority in response.authorities:
-                log.debug("Authority: %r", authority)
-            for additional in response.additional:
-                log.debug("Additional: %r", additional)
-
-            if response.answers or recursive:
-                cnames = tuple(filter(None, (record.decode_domain() for record in response.answers if record.rtype == RecordType.CNAME)))
-                if len(cnames) == len(response.answers):
-                    log.debug("Found CNAME-only answers, following `%s`.", cnames[0])
-                    new_authorities = tuple(ROOT_SERVERS.values())
-                    return await self.query(cnames[0], qtype, authorities=new_authorities)
+            log.debug(response)
+            if response.response_code == ResponseCode.NO_ERROR:
+                if response.is_authoritative:
+                    # The queried nameserver is authoritative for this domain.
+                    return authority
                 else:
-                    log.debug("Found answers or recursive query, returning response.")
-                    return response
-            elif response.authorities:
-                log.debug("Non-authoritative response from `%s` with %d authorities & %d additional records.", root_endpoint, len(response.authorities), len(response.additional))
+                    log.debug("Non-authoritative response from `%s` with %d authorities & %d additional records.", root_endpoint, len(response.authorities), len(response.additional))
 
-                if response.additional:
-                    next_authorities = tuple(filter(None, (record.decode_ip() for record in response.additional if record.rtype == qtype)))
-                    log.debug("Querying %s for domain", next_authorities)
-                    return await self.query(domain, qtype, authorities=next_authorities)
-                else:
-                    nameserver = random.choice(tuple(filter(None, (record.decode_domain() for record in response.authorities))))
-                    log.debug("No additional records, looking up nameserver records for `%s`.", nameserver)
-                    ns_response = await self.query(nameserver, qtype)
-                    if ns_response is not None:
-                        nameserver_ips = filter(None, (answer.decode_ip() for answer in ns_response.answers))
-                        return await self.query(domain, qtype, authorities=tuple(nameserver_ips))
-                    else:
-                        log.warning("Could not resolve intermediary record `%s`", nameserver)
-                        return None
+                    if response.additional:
+                        # We have glue records, IP addresses for the NS records
+                        # in `response.authorities` so we can recurse directly.
+                        # TODO: this assumes the glue records are valid, which
+                        # I guess isn't guaranteed to be the case.
+                        ns_addresses = tuple(filter(None, (record.decode_ip() for record in response.additional if record.rtype == RecordType.A)))
+                        log.debug("Found glue records, recursing...")
+                        return await self.nameserver(domain, ns_addresses)
+                    elif response.authorities:
+                        # No glue records found, we have to look up the IP
+                        # addresses for the authority records.
+                        authority_domain = random.choice(tuple(filter(None, (record.decode_domain() for record in response.authorities))))
+                        log.debug("No glue records, resolving `%s`.", authority_domain)
+                        ns_ip = await self.resolve_ip(authority_domain)
+                        if ns_ip is None:
+                            log.error("No IP addresses found for authority `%s`", authority_domain)
+                            return None
+                        else:
+                            log.debug("Found IP for authority: %s", ns_ip)
+                            return await self.nameserver(domain, [ns_ip])
             else:
-                log.debug("No authorities or answers, returning response.")
-                return response
+                log.error("Error received: %s", response.response_code)
+                return None
         else:
-            return response
+            log.error("No response decoded from `%s`", authority)
+            return None
 
+    async def query(self, domain: str, qtype: RecordType = RecordType.A, recursive: bool = False) -> DNSMessage | None:
+        """Queries the DNS server of a domain for specific record types."""
+        authority = await self.nameserver(domain)
+        if authority is not None:
+            log.debug("Querying nameserver `%s` for `%s`", authority, domain)
+            ns_endpoint = Endpoint(authority, 53)
+            message = DNSMessage.query(domain, qtype, recursive=recursive)
+            return await self.prompter.prompt_udp(message, ns_endpoint)
+        else:
+            log.error("No nameservers found for `%s`", domain)
+            return None
+
+    async def update(self, zone: str, hostname: str, ip_address: IPv4Address, ttl: timedelta | int, rtype: RecordType = RecordType.A, rclass: RecordClass = RecordClass.IN) -> DNSMessage | None:
+        authority = await self.nameserver(zone)
+        if authority is not None:
+            log.debug("Updating nameserver `%s` for `%s`", authority, hostname)
+            ns_endpoint = Endpoint(authority, 53)
+            message = DNSMessage.update(zone, hostname, ip_address, ttl, rtype, rclass)
+            return await self.prompter.prompt_udp(message, ns_endpoint)
+        else:
+            log.error("No nameservers found for `%s`", zone)
+            return None
+
+    async def insert(self, zone: str, hostname: str, ip_address: IPv4Address, ttl: timedelta | int, rtype: RecordType = RecordType.A, rclass: RecordClass = RecordClass.IN) -> DNSMessage | None:
+        authority = await self.nameserver(zone)
+        if authority is not None:
+            log.debug("Inserting to nameserver `%s` for `%s`", authority, hostname)
+            ns_endpoint = Endpoint(authority, 53)
+            message = DNSMessage.insert(zone, hostname, ip_address, ttl, rtype, rclass)
+            return await self.prompter.prompt_udp(message, ns_endpoint)
+        else:
+            log.error("No nameservers found for `%s`", zone)
+            return None
+
+    async def delete(self, zone: str, hostname: str, rtype: RecordType = RecordType.A, rclass: RecordClass = RecordClass.IN) -> DNSMessage | None:
+        authority = await self.nameserver(zone)
+        if authority is not None:
+            log.debug("Deleting from nameserver `%s` for `%s`", authority, hostname)
+            ns_endpoint = Endpoint(authority, 53)
+            message = DNSMessage.delete(zone, hostname, rtype, rclass)
+            return await self.prompter.prompt_udp(message, ns_endpoint)
+        else:
+            log.error("No nameservers found for `%s`", zone)
+            return None
 
 async def lookup(domain: str):
     client = DNSClient()
-    ip_address = await client.resolve_ip(domain)
-    log.info("%s -> %s", domain, ip_address)
+    authority = await client.nameserver(domain)
+    log.info("%s nameserver: %s", domain, authority)
+    ip = await client.resolve_ip(domain)
+    log.info("%s IP: %s", domain, ip)
 
 
 if __name__ == "__main__":
     logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
     asyncio.run(lookup("chris.vandevel.de"), debug=True)
