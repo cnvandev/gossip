@@ -1,7 +1,5 @@
-import asyncio
 import logging
 import random
-import sys
 from collections.abc import Sequence
 from datetime import timedelta
 from ipaddress import IPv4Address, IPv6Address
