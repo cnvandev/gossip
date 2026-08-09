@@ -131,16 +131,3 @@ class DNSClient:
         else:
             log.error("No nameservers found for `%s`", zone)
             return None
-
-async def lookup(domain: str):
-    client = DNSClient()
-    authority = await client.nameserver(domain)
-    log.info("%s nameserver: %s", domain, authority)
-    ip = await client.resolve_ip(domain)
-    log.info("%s IP: %s", domain, ip)
-
-
-if __name__ == "__main__":
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-    logging.getLogger("asyncio").setLevel(logging.WARNING)
-    asyncio.run(lookup("chris.vandevel.de"), debug=True)

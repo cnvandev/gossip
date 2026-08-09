@@ -1,8 +1,7 @@
 import logging
+from collections.abc import Collection, Iterator, KeysView, MutableMapping
 from itertools import islice
-from typing import Collection, Iterator, KeysView, MutableMapping
-
-from typing_extensions import override
+from typing import override
 
 log = logging.getLogger(__name__)
 
@@ -14,7 +13,7 @@ class TrieNode[T](MutableMapping[Collection[str], T]):
     data: T | None
 
     def __init__(self, data: T | None = None) -> None:
-        self.branches = dict()
+        self.branches = {}
         self.data = data
 
     @override

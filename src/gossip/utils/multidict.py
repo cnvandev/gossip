@@ -22,7 +22,7 @@ class CaseInsensitiveMultiDict(UserDict):
     """
 
     def __missing__(self, key):
-        value = tuple()
+        value = ()
         self.data[key] = value
         return value
 
