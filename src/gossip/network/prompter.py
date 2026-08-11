@@ -56,9 +56,9 @@ class Prompter[Reply: Serializable]:
         reader, writer = await self.radio.tcp_send(address)
         log.debug("Connected to TCP %s, sending prompt %r", address, prompt)
         await prompt.write_to(writer)
-        log.info("Sent prompt to TCP %s", address)
+        log.debug("Sent prompt to TCP %s", address)
         reply = await self.deserializer(reader)
-        log.info("Received reply %r from TCP %s", reply, address)
+        log.debug("Received reply %r from TCP %s", reply, address)
         writer.close()
         await writer.wait_closed()
         return reply

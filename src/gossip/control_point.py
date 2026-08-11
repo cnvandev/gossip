@@ -39,5 +39,5 @@ async def client():
 
 if __name__ == "__main__":
     logging.getLogger("asyncio").setLevel(logging.WARNING)
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+    logging.basicConfig(stream=sys.stdout, level=logging.INFO)
     asyncio.run(client(), debug=True)
