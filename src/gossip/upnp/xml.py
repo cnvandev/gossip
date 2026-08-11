@@ -5,6 +5,7 @@ from typing import Self, override
 from xsdata.formats.converter import Converter, converter
 from xsdata.formats.dataclass.context import XmlContext
 from xsdata.formats.dataclass.parsers import XmlParser
+from xsdata.formats.dataclass.parsers.config import ParserConfig
 from xsdata.formats.dataclass.serializers import XmlSerializer
 
 from gossip.internet.mime import MediaType
@@ -50,7 +51,12 @@ converter.register_converter(MediaType, MediaTypeConverter())
 
 
 context = XmlContext()
-PARSER = XmlParser(context=context)
+# Real-world UPnP devices commonly add vendor extension elements (e.g. DLNA's
+# X_DLNADOC/X_DLNACAP) that aren't part of the core UPnP schema and that we
+# don't model. Rather than crash on every device that includes one, ignore
+# unrecognized elements/attributes.
+config = ParserConfig(fail_on_unknown_properties=False)
+PARSER = XmlParser(context=context, config=config)
 SERIALIZER = XmlSerializer(context=context)
 
 # This is the namespace map for UPnP XML documents, defaulting to the UPnP

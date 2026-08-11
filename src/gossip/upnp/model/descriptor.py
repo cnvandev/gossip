@@ -4,6 +4,8 @@ from collections import deque
 from collections.abc import MutableMapping
 from dataclasses import dataclass, field
 
+from xsdata.formats.dataclass.models.generics import AnyElement
+
 from gossip.internet.mime import MediaType
 from gossip.internet.uri import URI
 from gossip.ssdp.uri import SSDPDeviceTarget, SSDPTarget, UniqueServiceName
@@ -246,6 +248,20 @@ class Device(XMLSerializable):
     root sub element device.
     """
     deviceList: tuple["Device", ...] | None = field(default=None, metadata=dict(type="Element", name="device", wrapper="deviceList"))
+
+    """Vendor extension elements not covered by the UPnP device schema, e.g.
+    DLNA's `X_DLNADOC`/`X_DLNACAP`. Kept as raw `AnyElement`s rather than
+    modeled explicitly, since vendors add these freely; use `extensions_in()`
+    to query them by namespace.
+    """
+    extensions: tuple[object, ...] = field(default_factory=tuple, metadata=dict(type="Wildcard", namespace="##any"))
+
+    def extensions_in(self, namespace: str | URI) -> tuple[AnyElement, ...]:
+        """Returns extension elements belonging to the given XML namespace,
+        e.g. DLNA's `urn:schemas-dlna-org:device-1-0`.
+        """
+        prefix = f"{{{namespace}}}"
+        return tuple(extension for extension in self.extensions if extension.qname.startswith(prefix))
 
     def targets(self) -> MutableMapping[UniqueServiceName, URI]:
         """Returns a dictionary from USNs to SSDP target URLs they match."""
