@@ -1,4 +1,5 @@
 import logging
+from asyncio import Future
 from collections.abc import Mapping
 from ipaddress import IPv4Address, IPv6Address, ip_address
 
@@ -26,9 +27,13 @@ SEARCH_EXTENSIONS: Mapping[Strength, Mapping[Extension, Mapping[str, str]]] = {
 class SSDPClient(ExtendedHTTPClient):
     """A client to send SSDP protocol requests and receive responses."""
 
-    async def notify(self, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        """Broadcasts out an SSDP `NOTIFY` message."""
-        await self.broadcast("NOTIFY", SSDP_URI, headers)
+    async def notify(self, headers: Mapping[str, str] | None = None) -> Future:
+        """Broadcasts out an SSDP `NOTIFY` message.
+
+        Doesn't wait for the send to land - returns a future for its
+        completion, so callers can decide whether to await it or not.
+        """
+        return await self.broadcast("NOTIFY", SSDP_URI, headers)
 
     async def broadcast_search(self, headers: dict[str, str] | None = None, max_wait: int = 5, tcp_port: int | None = None) -> Stream[HTTPResponse]:
         """Broadcasts an SSDP `M-SEARCH` request and waits for responses."""

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from types import TracebackType
 
 from gossip.internet.uri import URI
@@ -7,6 +8,8 @@ from gossip.ssdp.extension import DISCOVER
 from gossip.ssdp.server import SSDPServer
 from gossip.ssdp.uri import SSDP_HOST
 from gossip.upnp.resource import UPnPDevice
+
+log = logging.getLogger(__name__)
 
 
 class SSDPDevice:
@@ -22,7 +25,13 @@ class SSDPDevice:
         self.client = SSDPClient()
 
     async def notify(self, subtype: URI) -> None:
-        """Sends notification requests for the resources we're serving."""
+        """Sends notification requests for the resources we're serving.
+
+        Await this to send every notification and wait for them all to land,
+        raising if any of them fail. For a fire-and-forget send instead,
+        schedule it as a task (e.g. `asyncio.create_task(...)`) rather than
+        awaiting it directly.
+        """
         notifications = (
             {
                 "Host": str(SSDP_HOST),
@@ -35,15 +44,22 @@ class SSDPDevice:
             for path, subresource_headers in self.upnp_device.items()
         )
         responses = (self.client.notify(notification) for notification in notifications)
-        await asyncio.gather(*responses)
+        completions = await asyncio.gather(*responses)
+        await asyncio.gather(*completions)
 
     async def __aenter__(self):
         server = await self.server.__aenter__()
 
-        # Send our waking-up notifications.
+        # Send our waking-up notifications, and wait for them to actually
+        # land - we want to fail fast at startup if we can't reach the
+        # network on every interface we're configured to use.
         await self.notify(URI.ssdp("alive"))
         return server
 
     async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None):
-        # Send our powering-down notifications.
-        await self.notify(URI.ssdp("byebye"))
+        # Send our powering-down notifications - a flaky interface shouldn't
+        # crash us on the way out, so we'll just log it instead.
+        try:
+            await self.notify(URI.ssdp("byebye"))
+        except Exception:
+            log.warning("Failed to send byebye notification.", exc_info=True)

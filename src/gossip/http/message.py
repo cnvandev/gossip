@@ -136,7 +136,7 @@ class HTTPResponse(HTTPMessage):
             return None
 
         try:
-            protocol_string, response_code, response_string = internet_message.start_line
+            protocol_string, response_code, _response_string = internet_message.start_line
         except ValueError:
             log.warning(f"Invalid HTTP start line: {internet_message.start_line}")
             return None
@@ -145,7 +145,7 @@ class HTTPResponse(HTTPMessage):
         # We can parse multiple versions of HTTP so we'll match against the name
         if protocol.name == HTTP_PROTOCOL.name:
             return cls(
-                HTTPStatus(int(response_code), response_string),
+                HTTPStatus(int(response_code)),
                 internet_message.headers,
                 internet_message.body,
                 protocol,

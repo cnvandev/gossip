@@ -25,6 +25,7 @@ class DNSClient:
         self.prompter = prompter
 
     async def resolve_ip(self, domain: str, qtype: RecordType = RecordType.A) -> IPv4Address | IPv6Address:
+        """Returns the IP address for a given domain."""
         response = await self.query(domain, qtype)
         if response is None:
             raise ValueError(f"No IP retrievable for {domain}")

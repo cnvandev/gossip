@@ -5,6 +5,7 @@ from asyncio.queues import Queue
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
 from collections.abc import Awaitable, Callable
+from ipaddress import IPv4Address, IPv6Address
 
 from aiostream import stream
 
@@ -112,8 +113,14 @@ class Prompter[Reply: Serializable]:
 
         return await asyncio.wait_for(reply_future, timeout=ttl)
 
-    async def broadcast(self, prompt: Serializable | Callable[[Endpoint], Serializable], host: Endpoint) -> None:
-        """Sends out a prompt broadcast datagram, ignoring replies."""
+    async def broadcast(self, prompt: Serializable | Callable[[Endpoint], Serializable], host: Endpoint) -> Future[list[tuple[bytes, Endpoint] | None]]:
+        """Sends out a prompt broadcast datagram on every interface.
+
+        Doesn't wait for the sends to land - returns a future for their
+        completion instead, so callers can decide whether to await it (and
+        propagate any per-interface delivery errors) or ignore it entirely
+        for a true fire-and-forget send.
+        """
         # We'll iterate on all interfaces that our radio is configured to use.
         connections = []
         for transport, protocol in await self.radio.udp_broadcast(host.address, host.port):
@@ -132,7 +139,7 @@ class Prompter[Reply: Serializable]:
             transport.sendto(serialized)
             transport.close()
 
-        await asyncio.gather(*connections)
+        return asyncio.gather(*connections)
 
     async def broadcast_prompt(self, prompt: Serializable | Callable[[Endpoint], Serializable], host: Endpoint, tcp_port: int | None = None, max_wait: int = 5):
         """Sends out a datagram message on the address and listens for replies."""
@@ -173,7 +180,7 @@ class Prompter[Reply: Serializable]:
                 _, udp_port = broadcast_transport.get_extra_info("sockname")
                 log.debug("Listening for replies on existing UDP: %s", udp_port)
 
-                async def udp_callback(data: bytes, sender: Endpoint, _: DatagramTransport):
+                async def udp_callback(data: bytes, _: IPv4Address | IPv6Address | None, sender: Endpoint, __: DatagramTransport):
                     log.debug("Receiving reply from UDP %s", sender)
                     udp_reply = await self.deserializer((data, sender))
                     if udp_reply is not None:

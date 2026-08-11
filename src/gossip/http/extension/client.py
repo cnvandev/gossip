@@ -1,4 +1,5 @@
 import random
+from asyncio import Future
 from collections import defaultdict
 from collections.abc import Mapping
 
@@ -92,8 +93,12 @@ class ExtendedHTTPClient(HTTPClient):
     async def broadcast(self,
         method: str, uri: URI, headers: Mapping[str, str] | None = None,
         extended_headers: Mapping[Strength, Mapping[Extension, Mapping[str, str]]] | None = None,
-    ) -> None:
-        """Make an extended HTTP request, with the extended headers."""
+    ) -> Future:
+        """Make an extended HTTP broadcast request, with the extended headers.
+
+        Doesn't wait for the sends to land - returns a future for their
+        completion, so callers can decide whether to await it or not.
+        """
         method, headers = self.extend(method, headers, extended_headers)
         request, destination = await self.prepare(method, uri, headers)
         return await self.prompter.broadcast(request, destination)

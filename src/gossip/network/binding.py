@@ -72,11 +72,14 @@ class Binding:
         # Otherwise, we'll bind to our own address and multicast locally.
         remote_address = str(group_address) if self.broadcast is not None else str(self.address)
 
-        # We don't need to bind to our own address for multicast; the protocol
-        # will set the multicast interface address.
+        # We have to bind to our own address explicitly, even though the
+        # protocol also sets the multicast interface address - otherwise the
+        # socket is left bound to an unspecified `0.0.0.0:0`, and callers who
+        # read back the assigned port (e.g. to listen for unicast replies on
+        # it) get port 0 instead of the one actually used to send.
         return await loop.create_datagram_endpoint(
             factory,
-            # local_addr=(str(self.address), 0),
+            local_addr=(str(self.address), 0),
             remote_addr=(remote_address, port),
             proto=IPPROTO_UDP,
             reuse_port=True,

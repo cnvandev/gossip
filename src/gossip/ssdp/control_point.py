@@ -1,6 +1,6 @@
 import logging
 import uuid
-from typing import Mapping
+from collections.abc import Iterable, Mapping
 from uuid import UUID
 
 from aiostream import Stream
@@ -10,9 +10,9 @@ from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.network.radio import Radio
+from gossip.network.replier import Replier
 from gossip.ssdp.client import SSDPClient
 from gossip.ssdp.headers import CPFN, CPUUID, TCP_PORT
-from gossip.ssdp.server import SSDPServer
 from gossip.ssdp.uri import SSDP_HOST, SSDPTarget
 
 log = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ class SSDPControlPoint:
     friendly_name: str
     uuid: UUID
 
-    server: SSDPServer
+    replier: Replier[HTTPRequest]
     client: SSDPClient
 
     devices: dict[URI, Mapping[str, str]]
@@ -36,12 +36,27 @@ class SSDPControlPoint:
         self.uuid = device_uuid
         self.devices = dict()
 
-    async def respond(self, request: HTTPRequest, endpoint: Endpoint) -> HTTPResponse | None:
+        self.client = SSDPClient(agent=agent, radio=radio)
+        self.replier = Replier(callback=self.respond, udp={SSDP_HOST: HTTPRequest.read_from}, radio=radio)
+
+    async def __aenter__(self):
+        await self.replier.__aenter__()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.replier.__aexit__(exc_type, exc_val, exc_tb)
+
+    async def respond(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
+        """Handle an incoming message from the SSDP multicast address.
+
+        Control points don't reply to `NOTIFY` messages, so this never
+        returns any responses - it's only here to feed `self.devices`.
+        """
         if request.method == "NOTIFY":
-            return await self.notify(request, endpoint)
+            await self.notify(request, remote)
         else:
-            log.debug("Ignoring request `%s` from %s", request, endpoint)
-            return None
+            log.debug("Ignoring request `%s` from %s", request, remote)
+        return ()
 
     async def notify(self, request: HTTPRequest, sender: Endpoint) -> None:
         """Handle a new update notification."""
