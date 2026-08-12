@@ -15,7 +15,7 @@ class DNSKey(SupportsBytes):
     rtype: RecordType
     rclass: RecordClass
 
-    def _parse_wire_domain(self, wire_bytes: bytes) -> str:
+    def _decode_domain(self, wire_bytes: bytes) -> str:
         """Helper to convert raw length-prefixed bytes to dotted domain string."""
         if not wire_bytes or wire_bytes == b"\x00":
             return "."
@@ -36,7 +36,7 @@ class DNSKey(SupportsBytes):
 
     def decode_name(self) -> str:
         """Decodes entry owner name to a dotted domain string."""
-        return self._parse_wire_domain(self.rname)
+        return self._decode_domain(self.rname)
 
     def __repr__(self) -> str:
         return f"{self.rtype.name}: {self.decode_name()}"
@@ -91,14 +91,14 @@ class Record(DNSKey):
     def decode_domain(self) -> str | None:
         """Decodes target domain for NS, CNAME, or PTR records."""
         if self.rtype in (RecordType.NS, RecordType.CNAME, RecordType.PTR):
-            return self._parse_wire_domain(self.rdata)
+            return self._decode_domain(self.rdata)
         return None
 
     def decode_mx(self) -> tuple[int, str] | None:
         """Decodes MX record into (preference, target_domain)."""
         if self.rtype == RecordType.MX and len(self.rdata) >= 2:
             preference = struct.unpack("!H", self.rdata[:2])[0]
-            domain = self._parse_wire_domain(self.rdata[2:])
+            domain = self._decode_domain(self.rdata[2:])
             return preference, domain
         return None
 
@@ -128,6 +128,43 @@ class Record(DNSKey):
         return super().__bytes__() + struct.pack("!IH", ttl_seconds, len(self.rdata)) + self.rdata
 
     @classmethod
+    def address(cls, hostname: str, ip: IPv4Address | IPv6Address, ttl: timedelta, rclass: RecordClass = RecordClass.IN) -> Self:
+        """An A or AAAA record for `hostname`, with type picked automatically
+        from the IP version."""
+        rtype = RecordType.A if isinstance(ip, IPv4Address) else RecordType.AAAA
+        return cls(
+            rname=cls._encode_domain(hostname),
+            rtype=rtype,
+            rclass=rclass,
+            ttl=ttl,
+            rdata=ip.packed,
+        )
+
+    @classmethod
+    def domain_target(cls, hostname: str, rtype: RecordType, target: str, ttl: timedelta, rclass: RecordClass = RecordClass.IN) -> Self:
+        """An NS/CNAME/PTR-shaped record for `hostname`: RDATA is itself a
+        wire-encoded domain name."""
+        return cls(
+            rname=cls._encode_domain(hostname),
+            rtype=rtype,
+            rclass=rclass,
+            ttl=ttl,
+            rdata=cls._encode_domain(target),
+        )
+
+    @classmethod
+    def mx(cls, hostname: str, preference: int, target: str, ttl: timedelta, rclass: RecordClass = RecordClass.IN) -> Self:
+        """An MX record for `hostname`: a 2-byte preference followed by the
+        target domain."""
+        return cls(
+            rname=cls._encode_domain(hostname),
+            rtype=RecordType.MX,
+            rclass=rclass,
+            ttl=ttl,
+            rdata=struct.pack("!H", preference) + cls._encode_domain(target),
+        )
+
+    @classmethod
     def delete(cls, hostname: str, rtype: RecordType) -> Self:
         """Delete old records (CLASS = ANY, TYPE = A, TTL = 0, RDLEN = 0)."""
         return cls(
@@ -139,12 +176,12 @@ class Record(DNSKey):
         )
 
     @classmethod
-    def insert(cls, hostname: str, rtype: RecordType, rclass: RecordClass, ttl: timedelta, rdata: bytes) -> Self:
+    def insert(cls, hostname: str, rtype: RecordType, ttl: timedelta, rdata: bytes, rclass: RecordClass = RecordClass.IN) -> Self:
         """Insert a new record with the given hostname, type, and data."""
         return cls(
             rname=cls._encode_domain(hostname),
             rtype=rtype,
-            rclass=RecordClass.IN,
+            rclass=rclass,
             ttl=ttl,
             rdata=rdata,
         )

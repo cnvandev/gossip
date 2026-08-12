@@ -165,7 +165,7 @@ class DNSMessage(Serializable):
             questions=[Question.domain(zone, RecordType.SOA, rclass)],
             authorities=[
                 Record.delete(hostname, rtype),
-                Record.insert(hostname, rtype, rclass, ttl, ip_address.packed),
+                Record.insert(hostname, rtype, ttl, ip_address.packed, rclass),
             ],
         )
 
@@ -187,7 +187,7 @@ class DNSMessage(Serializable):
             operation_code=OpCode.UPDATE,
             questions=[Question.domain(zone, RecordType.SOA, rclass)],
             authorities=[
-                Record.insert(hostname, rtype, rclass, ttl, ip_address.packed),
+                Record.insert(hostname, rtype, ttl, ip_address.packed, rclass),
             ],
         )
 
