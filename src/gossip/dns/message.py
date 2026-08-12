@@ -86,9 +86,12 @@ class DNSMessage(Serializable):
                 flags.append("truncated")
             if self.is_authentic:
                 flags.append("authentic")
-            flag_string = ": " if flags else "" + ", ".join(flags) + (" " if flags else "")
+            flag_string = (", " + ", ".join(flags)) if flags else ""
 
-            return f"RESPONSE({self.response_code.name}{flag_string}{", ".join(f"{name}={s}" for name, s in sections.items())})"
+            section_string = ", ".join(f"{name}={s}" for name, s in sections.items())
+            section_string = f": {section_string}" if section_string else ""
+
+            return f"RESPONSE({self.response_code.name}{flag_string}{section_string})"
 
     def __bytes__(self) -> bytes:
         flags = 0
