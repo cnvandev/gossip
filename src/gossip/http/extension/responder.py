@@ -6,6 +6,7 @@ from typing import Any
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
+from gossip.http.field import parse_field_values
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.predicate import RequestPredicate
 from gossip.http.resource import ResourceCollection
@@ -60,16 +61,13 @@ class ExtendedHTTPResponder(HTTPResponder):
                 # If the request has a declaration header for that combo, parse.
                 if extension_value := request.headers.get(header_key, None):
                     # There could be multiple extensions, joined by a comma.
-                    header_values = extension_value.split(",")
-                    for value in header_values:
-                        # Split into params & value, parse the namespace.
-                        parts = value.strip().split(";")
-
-                        # The first part is the URI/field name of the extension.
-                        # RFC 2774: "A URI can unambiguously be distinguished
-                        # from a field-name by the presence of a colon (":")."
-                        # Otherwise, the declaration is a normal header key.
-                        definition = parts[0].strip('"')
+                    for declaration, _params in parse_field_values(extension_value):
+                        # The declaration itself is the URI/field name of the
+                        # extension. RFC 2774: "A URI can unambiguously be
+                        # distinguished from a field-name by the presence of a
+                        # colon (":")." Otherwise, the declaration is a normal
+                        # header key.
+                        definition = declaration.strip('"')
                         if ":" in definition:
                             definition = URI.parse(definition)
 

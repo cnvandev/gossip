@@ -1,13 +1,13 @@
 import logging
 from collections import defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 from langcodes import Language
 
+from gossip.http.field import parse_field_values
 from gossip.internet.mime import MediaType
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
 
 
 class RequestPredicate[T]:
@@ -38,28 +38,28 @@ class RequestPredicate[T]:
 
         If none are acceptable, it returns an empty tuple.
         """
-        types_args = (option.strip().split(";") for option in accept_string.split(","))
-        acceptable = ((self.parse(type_string), dict(pair.strip().split("=") for pair in args)) for type_string, *args in types_args)
+        acceptable = ((self.parse(value), params) for value, params in parse_field_values(accept_string))
 
         # We'll group the acceptable types by quality according to the accept headers.
         grouped: defaultdict[float, list[tuple[T, dict[str, str]]]] = defaultdict(list)
         for accept_type, args in acceptable:
-            # 1 is the default quality, as per RFC <whatever>
+            # "If no 'q' parameter is present, the default weight is 1."
+            # (RFC 9110 §12.4.2)
             quality = float(args.pop("q", 1))
             grouped[quality].append((accept_type, args))
         log.debug("Grouped: %s", dict(grouped))
 
         # Now go down the list and return the first group with any acceptable
-        # options for our .
+        # options in our list.
         log.debug("Options: %s", self.options)
         for quality in sorted(grouped.keys(), reverse=True):
-            accepted = tuple((option, args) for option in self.options for (acceptable, args) in grouped[quality] if self.compare(option, acceptable))
+            accepted = tuple((option, entry_args) for option in self.options for (accept_value, entry_args) in grouped[quality] if self.compare(option, accept_value))
             log.debug("Accepted: %s", accepted)
             if accepted:
                 return accepted
 
         # If we're here, we found nothing.
-        return tuple()
+        return ()
 
 
 class MediaTypePredicate(RequestPredicate[MediaType]):

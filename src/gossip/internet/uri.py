@@ -1,9 +1,6 @@
-import logging
 from typing import Self, override
 from urllib.parse import ParseResult, urljoin, urlparse
 from uuid import UUID
-
-log = logging.getLogger(__name__)
 
 
 class URI(ParseResult):
@@ -15,14 +12,16 @@ class URI(ParseResult):
         return self.geturl()
 
     def join(self, path: str) -> Self:
-        new_path = urljoin(self.path, path)
-        return self.__class__(self.scheme, self.netloc, new_path, self.params, self.query, self.fragment)
+        """Resolve `path` against this URI as a relative reference (RFC
+        3986 §5). If `path` is itself an absolute URI, it replaces this one
+        entirely rather than being appended to it, the same as
+        `urllib.parse.urljoin`."""
+        return self.parse(urljoin(str(self), path))
 
     @classmethod
     def parse(cls, url: str, scheme: str = "") -> Self:
         """Parse a URI from a string using `urllib.parse.urlparse`."""
-        result = urlparse(url, scheme=scheme) if scheme else urlparse(url)
-        return cls(*result._asdict().values())
+        return cls(*urlparse(url, scheme=scheme))
 
     @classmethod
     def http(cls, path: str) -> Self:

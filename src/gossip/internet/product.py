@@ -112,10 +112,7 @@ class ProductStack(NamedTuple):
             elif character == ")":
                 # The comment is over (or reducing nesting), we can parse the
                 # token after the next space.
-                if comment == 1:
-                    token += ")"
-                else:
-                    token += character
+                token += character
                 comment -= 1
                 last_space = False
             elif not character.isspace() or comment:

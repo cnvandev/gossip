@@ -4,6 +4,7 @@ from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.extension.constants import Scope, Strength
+from gossip.http.field import parse_field_values
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
@@ -35,30 +36,38 @@ class Extension(HTTPAccessor):
         self.scope = scope
 
     def headers(self, request: HTTPRequest) -> Mapping[str, str]:
+        """Returns this extension's own headers from `request`, stripped of
+        their namespace prefix.
+
+        Per RFC 2774, a request declares an extension (in a
+        `Man`/`Opt`/`C-Man`/`C-Opt` header) along with the `ns=` namespace
+        prefix its headers use. If this extension isn't declared, or is
+        declared with no `ns=` given, there's no way to tell which headers
+        (if any) belong to it, so none are returned.
+        """
         namespace = None
         for strength in Strength:
             declaration_key = "-".join(filter(None, (self.scope, strength)))
             declaration_header = request.headers.get(declaration_key)
-            if declaration_header is not None:
-                # The request has a declaration that might contain this
-                # extension.
-                for declaration in declaration_header.split(","):
-                    parts = declaration.strip().split(";")
+            if declaration_header is None:
+                continue
 
-                    # The first part is the URI/field name of the extension.
-                    # RFC 2774: "A URI can unambiguously be distinguished from a
-                    # field-name by the presence of a colon (":")."
-                    # Otherwise, the declaration is a normal header key.
-                    definition = parts[0].strip('"')
-                    if ":" in definition:
-                        definition = URI.parse(definition)
+            # The request has a declaration that might contain this extension.
+            for declaration, params in parse_field_values(declaration_header):
+                # The declaration itself is the URI/field name of the
+                # extension. RFC 2774: "A URI can unambiguously be
+                # distinguished from a field-name by the presence of a colon
+                # (":")." Otherwise, the declaration is a normal header key.
+                definition = declaration.strip('"')
+                if ":" in definition:
+                    definition = URI.parse(definition)
 
-                    if definition == self.identifier:
-                        # This is us, we'll use our namespace.
-                        stripped_args = map(str.strip, parts[1:])
-                        pairs = (arg.split("=", maxsplit=1) for arg in stripped_args)
-                        params = {pair[0]: pair[1] if len(pair) > 1 else None for pair in pairs}
-                        namespace = params.get("ns", None)
+                if definition == self.identifier:
+                    # This is us, we'll use our namespace.
+                    namespace = params.get("ns") or None
+
+        if namespace is None:
+            return {}
 
         # Just return the headers that apply.
         return {key[2:]: value for key, value in request.headers.items() if key.startswith(namespace)}

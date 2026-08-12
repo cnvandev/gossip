@@ -1,4 +1,3 @@
-import logging
 from ipaddress import IPv4Address
 from typing import NamedTuple, Self, override
 from uuid import UUID
@@ -13,8 +12,6 @@ UPNP_DOMAIN = "upnp.org"
 SSDP_IP_ADDRESS = IPv4Address("239.255.255.250")
 SSDP_PORT: int = 1900
 SSDP_HOST = Endpoint(SSDP_IP_ADDRESS, SSDP_PORT)
-
-log = logging.getLogger(__name__)
 
 
 class SSDPDeviceTarget(URI):
@@ -52,7 +49,7 @@ class SSDPTarget(SSDPDeviceTarget):
     def service_id(cls, id: str, domain: str = UPNP_DOMAIN) -> Self:
         """Search for a specific service by ID."""
         stripped_domain = domain.replace(".", "-")
-        return cls.urn(":".join((stripped_domain, "serviceId", id)))
+        return cls.urn(f"{stripped_domain}:serviceId:{id}")
 
 
 class UniqueServiceName(NamedTuple):
