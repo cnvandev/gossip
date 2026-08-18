@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Buffer
+from asyncio.streams import StreamReader
 from typing import Self, override
 
 from xsdata.formats.converter import Converter, converter
@@ -77,5 +77,10 @@ class XMLSerializable:
         return SERIALIZER.render(self, ns_map=UPNP_NS_MAP)
 
     @classmethod
-    def from_xml(cls, buffer: Buffer) -> Self:
-        return PARSER.from_bytes(bytes(buffer), cls, ns_map=UPNP_NS_MAP)
+    async def from_xml(cls, reader: StreamReader) -> Self:
+        # xsdata's parser is synchronous under the hood (`etree.iterparse()`
+        # calls `.read()` in a blocking loop), so it can't take a
+        # `StreamReader` directly - read it fully here, then hand the bytes
+        # off to the synchronous parser.
+        data = await reader.read()
+        return PARSER.from_bytes(data, cls, ns_map=UPNP_NS_MAP)

@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from http import HTTPMethod, HTTPStatus
 from ipaddress import ip_address
 from typing import Any
@@ -72,7 +72,7 @@ class HTTPResponder(ResourceCollection):
 
     def default_headers(self) -> dict[str, str]:
         """The standard headers for an HTTP response message from this server."""
-        request_time = datetime.now()
+        request_time = datetime.now(UTC)
         return self.static_headers | {
             "Date": request_time.strftime(TIME_FORMAT),
         }
@@ -178,14 +178,18 @@ class HTTPResponder(ResourceCollection):
                 # TODO: Implement this, I forget how connect works.
                 return ()
             case HTTPMethod.TRACE:
-                # Spit the request back to the client, as it was received.
-                body = bytes(request)
-                metadata = {
-                    "Content-Type": str(MediaType.message("http")),
-                    "Content-Length": str(len(body)),
-                }
+                if request.headers.get("Content-Length"):
+                    # RFC 9110 §9.3.8: a client MUST NOT send content in a
+                    # TRACE request.
+                    return (HTTPResponse(HTTPStatus.BAD_REQUEST, self.default_headers()),)
+
+                # Hand request.body straight back as the response's own
+                # body - we don't need to read it ourselves, so there's no
+                # need to build a separate echo just to have something to
+                # send. No Content-Length: its length is unknown to us.
+                metadata = {"Content-Type": str(MediaType.message("http"))}
                 response_headers = self.default_headers() | dict(metadata)
-                return (HTTPResponse(HTTPStatus.OK, response_headers, body=body),)
+                return (HTTPResponse(HTTPStatus.OK, response_headers, body=request.body),)
             case _:
                 if request.method not in self.accessor.methods:
                     return self.unknown_method()

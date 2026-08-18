@@ -1,10 +1,12 @@
 import logging
+from asyncio.streams import StreamReader
 from collections.abc import Mapping
 from typing import Any
 
 from gossip.http.predicate import StringPredicate
 from gossip.http.resource import ResourceCollection
 from gossip.internet.uri import URI
+from gossip.network.serializer import BufferedReader
 from gossip.ssdp.headers import BOOT_ID, CONFIG_ID
 from gossip.ssdp.uri import SSDPTarget
 from gossip.upnp.model.descriptor import Device, DeviceSpec, Version
@@ -61,8 +63,9 @@ class UPnPDevice(ResourceCollection):
             URLBase=url_base,
         )
 
-    async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[Any, Mapping[str, str]]:
-        xml = self.get_spec(url_base=exact_uri).to_xml()
-        return xml.encode("utf-8"), {
+    async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[StreamReader | None, Mapping[str, str]]:
+        xml = self.get_spec(url_base=exact_uri).to_xml().encode("utf-8")
+        return BufferedReader.for_bytes(xml), {
             "Content-Type": "application/xml",
+            "Content-Length": str(len(xml)),
         }

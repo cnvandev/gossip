@@ -24,6 +24,18 @@ class TestCistr:
         regardless of casing."""
         assert cistr("Content-Type") != "content-length"
 
+    def test_not_equal_to_a_non_string(self):
+        """A `cistr` never equals something that isn't a string at all -
+        there's no `.casefold()` to compare against, so `__eq__` falls back
+        to `False` rather than raising.
+
+        Uses `==` rather than `!=` deliberately: `cistr` only overrides
+        `__eq__`, not `__ne__`, so `!=` actually resolves to `str`'s own
+        inherited `__ne__` instead of negating this `__eq__` - it happens
+        to still return the right answer here, but via a completely
+        different code path that wouldn't exercise this branch at all."""
+        assert (cistr("Content-Type") == 42) == False
+
 
 class TestCaseInsensitiveMultiDictAccess:
     """Reading and writing entries by key, regardless of the casing used to

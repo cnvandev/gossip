@@ -30,8 +30,8 @@ async def client():
                         device_response = await http_client.get(device_uri)
 
                         if device_response is not None and device_response.status.is_success and device_response.body is not None:
-                            device = DeviceSpec.from_xml(device_response.body).device
-                            log.info("Found %s", UPnPDevice(device))
+                            spec = await DeviceSpec.from_xml(device_response.body)
+                            log.info("Found %s", UPnPDevice(spec.device))
                             results[device_uri] = device_response
                     else:
                         log.debug("Skipping %s, already seen", device_uri)

@@ -1,11 +1,11 @@
 import logging
-from asyncio.streams import StreamReader
-from collections.abc import Awaitable, Buffer, Callable, Iterable, Mapping
+from asyncio.streams import StreamReader, StreamWriter
+from collections.abc import Iterable, Mapping
 from functools import cache
 from http import HTTPStatus
-from typing import Self
+from typing import Self, override
 
-from gossip.internet.message import InternetMessage, read_into_memory
+from gossip.internet.message import InternetMessage
 from gossip.internet.product import Product
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 HTTP_PROTOCOL: Product = Product("HTTP", str(1.1))
 
 
-class HTTPMessage(Serializable):
+class HTTPMessage:
     """A base HTTP message."""
 
     """The start line, which will be strung together with spaces when serialized."""
@@ -26,16 +26,29 @@ class HTTPMessage(Serializable):
     """Request or response metadata."""
     headers: multidict
 
-    """A message body, or `None` if unnecessary/not included."""
-    body: Buffer | None
+    """A readable message body, or `None` if none was included."""
+    body: StreamReader | None
 
-    def __init__(self, start_line: Iterable[str], headers: Mapping[str, str] | None = None, body: Buffer | None = None):
+    def __init__(self, start_line: Iterable[str], headers: Mapping[str, str] | None = None, body: StreamReader | None = None):
         self.start_line = tuple(start_line)
         self.headers = multidict(headers or {})
         self.body = body
 
+    def _as_internet_message(self) -> InternetMessage:
+        raise NotImplementedError("HTTPMessage subclasses need to implement _as_internet_message()")
 
-class HTTPRequest(HTTPMessage):
+    def __bytes__(self) -> bytes:
+        """Convert to `bytes` for serialization. Only supports headers-only
+        messages (e.g. a `HEAD` request) - one with a body must be sent via
+        `write_to()` instead."""
+        return bytes(self._as_internet_message())
+
+    async def write_to(self, writer: StreamWriter) -> None:
+        """Stream this message to a writer, body (and any trailers) included."""
+        await self._as_internet_message().write_to(writer)
+
+
+class HTTPRequest(HTTPMessage, Serializable):
     """A request for a resource that matches the accept constraints."""
 
     """A static product version string, like HTTP/1.1."""
@@ -50,33 +63,29 @@ class HTTPRequest(HTTPMessage):
     """
     target: URI
 
-    def __init__(self, method: str, target: URI, headers: Mapping[str, str] | None = None, body: Buffer | None = None, protocol: Product = HTTP_PROTOCOL):
+    def __init__(self, method: str, target: URI, headers: Mapping[str, str] | None = None, body: StreamReader | None = None, protocol: Product = HTTP_PROTOCOL):
         self.protocol = protocol
         self.method = method
         self.target = target
 
-        # Start line format is `<METHOD> <path> <protocol>` i.e. `GET *`
-        # and the writer will fill in the protocol for us.
+        # Start line format is `<METHOD> <path> <protocol>`
+        # (i.e. `GET * HTTP/1.1`), the writer will fill in the protocol for us.
         start_line = tuple(map(str, (self.method.upper(), self.target)))
         super().__init__(start_line, headers, body)
 
-    def __bytes__(self) -> bytes:
-        """Convert to `bytes` for serialization."""
+    @override
+    def _as_internet_message(self) -> InternetMessage:
         start_line = tuple(self.start_line) + (self.protocol,)
-        message = InternetMessage(
-            map(str, start_line),
-            self.headers,
-            self.body,
-        )
-        return bytes(message)
+        return InternetMessage(map(str, start_line), self.headers, self.body)
 
     @cache
     def __repr__(self) -> str:
         return " ".join(map(str, self.start_line + (self.protocol,)))
 
+    @override
     @classmethod
-    async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint], body_reader: Callable[[StreamReader], Awaitable[Buffer]] = read_into_memory) -> Self | None:
-        internet_message = await InternetMessage.read_from(reader, body_reader=body_reader)
+    async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint]) -> Self | None:
+        internet_message = await InternetMessage.read_from(reader)
         if internet_message is None:
             # Return None directly - if we can't even recover a message from the
             # stream, it's probably jibberish.
@@ -97,39 +106,35 @@ class HTTPRequest(HTTPMessage):
             return None
 
 
-class HTTPResponse(HTTPMessage):
+class HTTPResponse(HTTPMessage, Serializable):
     """A response for a resource representation matching the request."""
 
     """A static product version string, like HTTP/1.1."""
     protocol: Product
 
+    """The HTTP status code and reason phrase for this response."""
     status: HTTPStatus
 
-    def __init__(self, status: HTTPStatus, headers: Mapping[str, str] | None = None, body: Buffer | None = None, protocol: Product = HTTP_PROTOCOL):
+    def __init__(self, status: HTTPStatus, headers: Mapping[str, str] | None = None, body: StreamReader | None = None, protocol: Product = HTTP_PROTOCOL):
         self.status = status
         self.protocol = protocol
 
         start_line = tuple(map(str, (self.status.value, self.status.phrase)))
         super().__init__(start_line, headers, body)
 
-    def __bytes__(self) -> bytes:
-        """Convert to `bytes` for serialization."""
+    @override
+    def _as_internet_message(self) -> InternetMessage:
         start_line = (self.protocol,) + tuple(self.start_line)
-
-        message = InternetMessage(
-            map(str, start_line),
-            self.headers,
-            self.body,
-        )
-        return bytes(message)
+        return InternetMessage(map(str, start_line), self.headers, self.body)
 
     @cache
     def __repr__(self) -> str:
         return " ".join(map(str, (self.protocol,) + self.start_line))
 
+    @override
     @classmethod
-    async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint], body_reader: Callable[[StreamReader], Awaitable[Buffer]] = read_into_memory) -> Self | None:
-        internet_message = await InternetMessage.read_from(reader, body_reader=body_reader)
+    async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint]) -> Self | None:
+        internet_message = await InternetMessage.read_from(reader)
         if internet_message is None:
             # Return None directly - if we can't even recover a message from the
             # stream, it's probably jibberish.

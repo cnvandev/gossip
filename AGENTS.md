@@ -103,3 +103,20 @@ what it represents. Two exceptions:
 
 If generating the bytes would take more than a line or two, a raw literal
 is fine - don't build a small parser just to avoid one.
+
+### Shared test doubles
+
+A test double that isn't tied to one source module - `FakeStreamWriter`,
+say, useful to any test exercising a `write_to(writer: StreamWriter)` -
+belongs in `tests/support/`, not duplicated across the test files that use
+it. This is different from `tests/utils/`, which mirrors `gossip/utils/`
+and holds tests *for* that package; `tests/support/` holds infrastructure
+*for tests themselves*, with no source-module counterpart.
+
+When the real type being faked is a concrete class (not a `Protocol`),
+subclass it rather than just duck-typing the methods you need - that's
+what makes the fake type-check anywhere the real type is expected. Skip
+calling the real `__init__()` if it demands things a test won't have (a
+live transport, an event loop, ...), but watch for other inherited methods
+that assume `__init__()` ran (e.g. `StreamWriter.__del__` reads
+`self._transport`) and override those too.

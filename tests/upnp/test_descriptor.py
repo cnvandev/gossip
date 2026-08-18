@@ -1,7 +1,9 @@
+from asyncio import run as run_async
 from pathlib import Path
 from uuid import UUID
 
 from gossip.internet.uri import URI
+from gossip.network.serializer import BufferedReader
 from gossip.ssdp.uri import SSDPTarget, UniqueServiceName
 from gossip.upnp.model.descriptor import Device
 
@@ -27,7 +29,7 @@ class TestDeviceExtensionsIn:
 
     def _device_with_dlna_extensions(self) -> Device:
         xml = (DATA_DIR / "device_with_dlna_extensions.xml").read_text()
-        return Device.from_xml(xml.encode())
+        return run_async(Device.from_xml(BufferedReader.for_bytes(xml.encode())))
 
     def test_returns_elements_in_the_matching_namespace(self):
         """An extension element from the requested namespace is returned,

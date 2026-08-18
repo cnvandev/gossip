@@ -1,4 +1,6 @@
 from collections import UserDict
+from collections.abc import Iterator
+from typing import override
 
 
 class cistr(str):
@@ -7,42 +9,51 @@ class cistr(str):
     Used as a key for `CaseInsensitiveMultiDict`.
     """
 
-    def __hash__(self):
+    @override
+    def __hash__(self) -> int:
         return hash(self.casefold())
 
-    def __eq__(self, other):
-        return self.casefold() == other.casefold()
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, cistr):
+            return self.casefold() == other.casefold()
+        elif isinstance(other, str):
+            return self == cistr(other)
+        else:
+            return False
 
 
-class CaseInsensitiveMultiDict(UserDict):
+class CaseInsensitiveMultiDict(UserDict[str, str]):
     """A case-insensitive multi-dictionary.
 
     This is suitable for serializing/deserializing as repeated key-value pairs
     as used in HTTP headers and query strings.
     """
 
-    def __contains__(self, key):
+    @override
+    def __contains__(self, key: object) -> bool:
         return super().__contains__(cistr(key))
 
-    def __setitem__(self, key, value):
+    @override
+    def __setitem__(self, key: str, value: str) -> None:
         super().__setitem__(cistr(key), value)
 
-    def __getitem__(self, key):
+    @override
+    def __getitem__(self, key: str) -> str:
         return super().__getitem__(cistr(key))
 
-    def __delitem__(self, key):
+    @override
+    def __delitem__(self, key: str) -> None:
         super().__delitem__(cistr(key))
 
-    def __iter__(self):
+    @override
+    def __iter__(self) -> Iterator[str]:
         """An iterator over the keys in this multi-dictionary.
 
         Yield plain `str` keys, not the internal `cistr`s they're stored
         as - `cistr`'s case-insensitive hash/eq only make sense inside this
         class. A `cistr` leaking out and landing in an ordinary `dict` or
-        `set` alongside plain strings would silently fail to match them
-        (e.g. `"Content-Length" in dict(some_multidict)` could be `False`
-        even when that exact header is present), since `keys()`, `items()`,
-        and `dict(this)` are all built on `__iter__`.
+        `set` alongside plain strings would silently fail to match them.
         """
         return (str(key) for key in self.data)
 

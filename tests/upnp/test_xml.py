@@ -1,5 +1,8 @@
+from asyncio import run as run_async
+
 from gossip.internet.mime import MediaType
 from gossip.internet.uri import URI
+from gossip.network.serializer import BufferedReader
 from gossip.upnp.model.descriptor import Icon, Version
 from gossip.upnp.xml import MediaTypeConverter, URIConverter
 
@@ -46,20 +49,15 @@ class TestXMLSerializableRoundTrip:
         """A dataclass of plain fields serializes to XML and parses back to
         an equal instance."""
         version = Version(major=1, minor=0)
-        assert Version.from_xml(version.to_xml().encode()) == version
+        parsed = run_async(Version.from_xml(BufferedReader.for_bytes(version.to_xml().encode())))
+        assert parsed == version
 
     def test_uri_and_media_type_fields_round_trip_as_their_real_types(self):
         """Fields typed as `URI`/`MediaType` come back as those types, not
         as plain strings, since the registered converters are used during
         parsing too."""
         icon = Icon(mimetype=MediaType.image("png"), width=32, height=32, depth=24, url=URI.parse("/icon.png"))
-        parsed = Icon.from_xml(icon.to_xml().encode())
+        parsed = run_async(Icon.from_xml(BufferedReader.for_bytes(icon.to_xml().encode())))
         assert parsed == icon
         assert isinstance(parsed.url, URI)
         assert isinstance(parsed.mimetype, MediaType)
-
-    def test_from_xml_accepts_a_buffer(self):
-        """`from_xml()` takes any `Buffer` (e.g. `bytearray`), not just
-        `bytes`."""
-        version = Version(major=2, minor=1)
-        assert Version.from_xml(bytearray(version.to_xml().encode())) == version
