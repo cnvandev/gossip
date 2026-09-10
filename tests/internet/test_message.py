@@ -1,4 +1,4 @@
-from asyncio import Future, StreamReader, get_running_loop, sleep
+from asyncio import StreamReader, get_running_loop, sleep
 from asyncio import run as run_async
 from ipaddress import IPv4Address
 
@@ -7,6 +7,7 @@ import pytest
 from gossip.internet.message import InternetMessage
 from gossip.network.endpoint import Endpoint
 from gossip.network.serializer import BufferedReader
+from gossip.utils.multidict import multidict
 
 from ..support.streams import FakeStreamWriter
 
@@ -22,7 +23,7 @@ class TestInternetMessageSerialization:
         """The start line's parts are joined with spaces and end the line
         with CRLF."""
         message = InternetMessage(("GET", "/foo", "HTTP/1.1"), {})
-        assert bytes(message).startswith(b"GET /foo HTTP/1.1\r\n")
+        assert bytes(message) == b"GET /foo HTTP/1.1\r\n\r\n"
 
     def test_empty_start_line_is_omitted(self):
         """A falsy start line (e.g. `()`) contributes nothing - the message
@@ -64,23 +65,148 @@ class TestInternetMessageBytesRejectsBodyOrTrailers:
             _ = bytes(message)
 
     def test_does_not_raise_for_headers_only(self):
-        """A plain headers-only message is exactly what `bytes()` is for."""
+        """A plain headers-only message is exactly what `bytes()` is for -
+        `trailers` being `None` (not given) is just as fine as it being
+        empty."""
         _ = bytes(InternetMessage((), {"Host": "example.com"}))
 
-    def test_raises_for_a_future_valued_trailers_even_if_already_resolved(self):
-        """A `Future`-valued `trailers` fails this check too, even one
-        that's already resolved - `bytes()` has no way to synchronously
-        await it, and treating an already-done one specially would make
-        this raise or not depending purely on timing."""
+
+class TestInternetMessageTrailers:
+    """`InternetMessage.trailers` - `None` until known, populated in
+    place; `wait_trailers()` is the async way to get the same value,
+    computing it (by draining whatever's left of `body` and parsing it)
+    at most once."""
+
+    def test_defaults_to_none_and_needs_no_running_event_loop(self):
+        """Plain construction with no `trailers` given doesn't require an
+        event loop at all - `trailers` is just `None`, not something
+        bound to a background task."""
+        message = InternetMessage((), {})
+        assert message.trailers is None
+
+    def test_defaults_to_none_even_with_a_body(self):
+        """A `body` alone doesn't change anything about `trailers` -
+        `InternetMessage` has no idea what framing (if any) applies to
+        `body`, so it can't infer whether trailers are even possible.
+        `trailers` stays `None` until `wait_trailers()` is actually
+        called."""
+        message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"))
+        assert message.trailers is None
+
+    def test_a_plain_mapping_is_stored_immediately(self):
+        message = InternetMessage((), {}, trailers={"X-Checksum": "abc"})
+        assert dict(message.trailers) == {"X-Checksum": "abc"}
+
+    def test_wait_trailers_returns_none_when_there_is_no_body(self):
+        """With no `body` at all, there's nothing to drain - `None`,
+        same as `trailers` was already."""
+
+        async def check() -> multidict | None:
+            message = InternetMessage((), {})
+            return await message.wait_trailers()
+
+        assert run_async(check()) is None
+
+    def test_wait_trailers_drains_body_and_parses_it_as_trailers(self):
+        """`wait_trailers()` doesn't know or care whether `body` has
+        already had its "real" content read off it by someone else -
+        it just drains whatever's left and parses that, whole, as a
+        trailer section."""
+
+        async def check() -> dict[str, str] | None:
+            body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
+            message = InternetMessage((), {}, body=body)
+            trailers = await message.wait_trailers()
+            return dict(trailers) if trailers is not None else None
+
+        assert run_async(check()) == {"X-Checksum": "abc"}
+
+    def test_wait_trailers_parses_multiple_field_lines(self):
+        async def check() -> dict[str, str] | None:
+            body = BufferedReader.for_bytes(b"A: 1\r\nB: 2\r\n\r\n")
+            message = InternetMessage((), {}, body=body)
+            trailers = await message.wait_trailers()
+            return dict(trailers) if trailers is not None else None
+
+        assert run_async(check()) == {"A": "1", "B": "2"}
+
+    def test_wait_trailers_returns_empty_for_just_the_closing_crlf(self):
+        """Just a closing CRLF, with no field-lines before it, is a
+        valid (empty) trailer section."""
+
+        async def check() -> dict[str, str] | None:
+            body = BufferedReader.for_bytes(b"\r\n")
+            message = InternetMessage((), {}, body=body)
+            trailers = await message.wait_trailers()
+            return dict(trailers) if trailers is not None else None
+
+        assert run_async(check()) == {}
+
+    def test_wait_trailers_raises_for_a_field_line_without_a_colon(self):
+        """A genuinely malformed trailer field-line (no `:` to split on)
+        raises, the same way a malformed header line would fail
+        `read_from()` - via the same shared `parse_field_lines()`."""
 
         async def check() -> None:
-            future = get_running_loop().create_future()
-            future.set_result({})
-            message = InternetMessage((), {}, trailers=future)
-            with pytest.raises(ValueError):
-                _ = bytes(message)
+            body = BufferedReader.for_bytes(b"NotAFieldLine\r\n\r\n")
+            message = InternetMessage((), {}, body=body)
+            await message.wait_trailers()
 
-        run_async(check())
+        with pytest.raises(ValueError):
+            run_async(check())
+
+    def test_wait_trailers_populates_trailers_in_place(self):
+        async def check() -> dict[str, str] | None:
+            body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
+            message = InternetMessage((), {}, body=body)
+            await message.wait_trailers()
+            return dict(message.trailers) if message.trailers is not None else None
+
+        assert run_async(check()) == {"X-Checksum": "abc"}
+
+    def test_wait_trailers_reads_body_at_most_once(self):
+        """Calling `wait_trailers()` again after it's already resolved
+        doesn't re-read `body` - the memoized `trailers` value is just
+        returned directly."""
+
+        async def check() -> dict[str, str] | None:
+            body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
+            message = InternetMessage((), {}, body=body)
+            first = await message.wait_trailers()
+            second = await message.wait_trailers()
+            assert first is second
+            return dict(second) if second is not None else None
+
+        assert run_async(check()) == {"X-Checksum": "abc"}
+
+    def test_wait_trailers_returns_a_plain_mapping_without_reading_anything(self):
+        async def check() -> dict[str, str] | None:
+            message = InternetMessage((), {}, trailers={"X-Checksum": "abc"})
+            trailers = await message.wait_trailers()
+            return dict(trailers) if trailers is not None else None
+
+        assert run_async(check()) == {"X-Checksum": "abc"}
+
+    def test_wait_trailers_waits_for_body_to_actually_have_data(self):
+        """A `body` that hasn't delivered its trailer bytes yet (and
+        isn't at EOF either) means `wait_trailers()` genuinely suspends -
+        it doesn't just read whatever's instantaneously available and
+        call it done."""
+
+        async def check() -> dict[str, str] | None:
+            body = StreamReader()
+            message = InternetMessage((), {}, body=body)
+
+            wait_task = get_running_loop().create_task(message.wait_trailers())
+            await sleep(0)
+            assert not wait_task.done()
+
+            body.feed_data(b"X-Checksum: abc\r\n\r\n")
+            body.feed_eof()
+            trailers = await wait_task
+            return dict(trailers) if trailers is not None else None
+
+        assert run_async(check()) == {"X-Checksum": "abc"}
 
 
 class TestInternetMessageWriteTo:
@@ -106,53 +232,20 @@ class TestInternetMessageWriteTo:
     def test_no_trailers_written_when_there_are_none(self):
         """With an empty trailers mapping, nothing is written beyond the
         body."""
-        message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"))
+        message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers={})
         writer = FakeStreamWriter()
         run_async(message.write_to(writer))
         assert bytes(writer.buffer) == b"\r\nhi"
 
-    def test_awaits_a_future_valued_trailers_before_writing_them(self):
-        """Trailers that aren't known yet at construction time - e.g. a
-        checksum computed while streaming the body above - can be a
-        `Future` instead of a plain mapping. `write_to()` genuinely
-        suspends waiting for it, after the body, rather than just
-        happening to read whatever value is there by the time it gets
-        there - it only serializes trailers once the future actually
-        resolves."""
-
-        async def write_it() -> bytes:
-            future = get_running_loop().create_future()
-            message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers=future)
-            writer = FakeStreamWriter()
-
-            write_task = get_running_loop().create_task(message.write_to(writer))
-            # Let write_to() run as far as it can: start line, headers, and
-            # body all complete without any real suspension (FakeStreamWriter's
-            # drain() doesn't actually wait), so this is enough for it to
-            # reach - and genuinely suspend on - the unresolved future.
-            await sleep(0)
-            assert not write_task.done()
-
-            future.set_result({"X-Checksum": "abc"})
-            await write_task
-            return bytes(writer.buffer)
-
-        assert run_async(write_it()) == b"\r\nhiX-Checksum: abc\r\n\r\n"
-
-    def test_writes_nothing_extra_when_the_future_resolves_empty(self):
-        """A `Future`-valued `trailers` that resolves to an empty mapping
-        behaves the same as an empty plain mapping - nothing written
-        beyond the body."""
-
-        async def write_it() -> bytes:
-            future = get_running_loop().create_future()
-            future.set_result({})
-            message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers=future)
-            writer = FakeStreamWriter()
-            await message.write_to(writer)
-            return bytes(writer.buffer)
-
-        assert run_async(write_it()) == b"\r\nhi"
+    def test_no_trailers_given_resolves_to_nothing_extra_once_body_is_drained(self):
+        """Trailers not given at all means `write_to()` falls through to
+        `wait_trailers()`, which - after the body's just been streamed
+        out, fully draining it - finds nothing left to parse. Nothing
+        extra gets written, same as an explicitly empty mapping."""
+        message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"))
+        writer = FakeStreamWriter()
+        run_async(message.write_to(writer))
+        assert bytes(writer.buffer) == b"\r\nhi"
 
 
 class TestInternetMessageRepr:

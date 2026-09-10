@@ -1,5 +1,4 @@
 import logging
-from asyncio import Future
 from asyncio.streams import StreamReader, StreamWriter
 from collections.abc import Iterable, Mapping
 from functools import cache
@@ -17,6 +16,16 @@ BODY_CHUNK_SIZE = 65536
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
+
+
+def parse_field_lines(lines: Iterable[str]) -> multidict:
+    """Parse `name: value` field-lines into a multidict - the format an
+    HTTP header block and a trailer section share alike, so both
+    `read_from()` (headers) and `wait_trailers()` (trailers) parse
+    through here rather than each keeping its own copy.
+    """
+    pairs = (line.split(":", maxsplit=1) for line in lines)
+    return multidict({key: value.strip() for key, value in pairs})
 
 
 class InternetMessage(Serializable):
@@ -49,25 +58,47 @@ class InternetMessage(Serializable):
     `None` instead."""
     body: StreamReader | None
 
-    """HTTP trailers, deserialized as a key-value pair mapping - or, for a
-    message being sent whose trailers aren't known yet (e.g. a checksum
-    that's only computable once the body's finished streaming), a
-    `Future` that resolves to one. `write_to()` awaits it before
-    serializing; `bytes()` doesn't support a `Future` here any more than
-    it supports a body - there's nothing to synchronously wait on.
-    """
-    trailers: multidict | Future[multidict]
+    """Trailer fields, deserialized as a key-value pair mapping - `None`
+    until they're actually known. Given explicitly at construction, it's
+    known immediately; left unset, it's `None` until `wait_trailers()`
+    computes it.
 
-    def __init__(self, start_line: Iterable[str], headers: Mapping[str, str], body: StreamReader | None = None, trailers: Mapping[str, str] | Future[multidict] | None = None):
+    Built from whatever's left on `body` once the caller's done reading the
+    message's real content off it.
+    """
+    trailers: multidict | None
+
+    def __init__(self, start_line: Iterable[str], headers: Mapping[str, str], body: StreamReader | None = None, trailers: Mapping[str, str] | None = None):
         """Create a new InternetMessage from a start line, headers, an an optional body and trailers."""
         self.start_line = start_line
         self.headers = multidict(headers)
         self.body = body
-        self.trailers = trailers if isinstance(trailers, Future) else multidict(trailers or {})
+        self.trailers = multidict(trailers) if trailers is not None else None
 
     @cache
     def __repr__(self) -> str:
         return " ".join(map(str, tuple(self.start_line)))
+
+    async def wait_trailers(self) -> multidict | None:
+        """Returns `trailers`, computing it first if it isn't already
+        known - `None` if there's no `body` to read from at all.
+        Memoized into `trailers` in place, so repeated calls don't
+        re-read `body`.
+
+        Computing it means dumping whatever's left of `body` into memory
+        and parsing it as trailer field-lines, whole - it's on the caller
+        to have already read exactly the message's real content off
+        `body` and stopped there before calling this.
+        """
+        if self.trailers is not None:
+            return self.trailers
+        if self.body is None:
+            return None
+
+        data = await self.body.read()
+        lines = (line.strip() for line in data.decode().split(CRLF))
+        self.trailers = parse_field_lines(filter(None, lines))
+        return self.trailers
 
     @override
     def __bytes__(self) -> bytes:
@@ -76,10 +107,10 @@ class InternetMessage(Serializable):
 
         A message with a body or trailers can't be fully represented this
         way; use `write_to()` instead, which streams the body and sends
-        trailers too. A `Future`-valued `trailers` fails this check too,
-        even one that already has a result - there's no synchronous way
-        to wait on it here, and treating an already-resolved one specially
-        would make this raise or not depending on timing.
+        trailers too. A message whose `trailers` are still pending fails
+        this check too - but that's already covered by `self.body is not
+        None`, since `trailers` can only be pending when there's a body
+        to wait on in the first place.
         """
         if self.body is not None or self.trailers:
             raise ValueError("bytes() only supports headers-only messages - use write_to() for a body or trailers.")
@@ -118,10 +149,10 @@ class InternetMessage(Serializable):
                 writer.write(chunk)
                 await writer.drain()
 
-        # Trailers might not be known yet (e.g. a checksum computed while
-        # streaming the body above) - wait for them here, after the body's
-        # done, rather than requiring the caller to have them upfront.
-        trailers = await self.trailers if isinstance(self.trailers, Future) else self.trailers
+        # Trailers might not be known yet - wait for them here, after the
+        # body's been streamed out (and so, by construction, fully
+        # drained) above.
+        trailers = await self.wait_trailers()
 
         # Send trailers, if we have any.
         if trailers:
@@ -159,11 +190,7 @@ class InternetMessage(Serializable):
             if not lines or not lines[0]:
                 return None
             start_line = lines[0].split(maxsplit=2)
-            header_lines = filter(None, lines[1:])
-            header_pairs = (line.split(":", maxsplit=1) for line in header_lines)
-
-            # We'll read the headers into a dictionary
-            headers = multidict({header_key: value.strip() for header_key, value in header_pairs})
+            headers = parse_field_lines(filter(None, lines[1:]))
 
             log.debug("Correctly decoded headers (%d pairs)", len(headers))
 

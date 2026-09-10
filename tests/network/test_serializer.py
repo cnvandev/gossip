@@ -1,7 +1,7 @@
-from asyncio import StreamReader
+from asyncio import StreamReader, get_running_loop, sleep
 from asyncio import run as run_async
 
-from gossip.network.serializer import BoundedReader, BufferedReader
+from gossip.network.serializer import BufferedReader
 
 
 class TestBufferedReader:
@@ -34,6 +34,23 @@ class TestBufferedReader:
 
         assert run_async(read_it()) == b"hello"
 
+    def test_wait_closed_blocks_until_feed_eof(self):
+        """`wait_closed()` genuinely suspends until `feed_eof()` is
+        called - it isn't already resolved just because the reader
+        exists."""
+
+        async def check() -> bool:
+            reader = BufferedReader()
+            wait_task = get_running_loop().create_task(reader.wait_closed())
+            await sleep(0)
+            not_yet_closed = not wait_task.done()
+
+            reader.feed_eof()
+            await wait_task
+            return not_yet_closed
+
+        assert run_async(check()) is True
+
 
 class TestBufferedReaderForBytes:
     """`BufferedReader.for_bytes()` - the factory that automates the
@@ -58,102 +75,8 @@ class TestBufferedReaderForBytes:
 
         assert run_async(read_it()) == b"hello"
 
-
-class TestBoundedReader:
-    """`BoundedReader` - a `StreamReader` that pumps at most `limit` bytes
-    from a source reader, then reports EOF, regardless of what's left on
-    the source behind it."""
-
-    def test_stops_at_the_limit_even_though_more_is_available(self):
-        """Only `limit` bytes come through, even though the source has
-        more behind them."""
-
-        async def read_it() -> bytes:
-            source = BufferedReader.for_bytes(b"hello world, more than five bytes")
-            bounded = BoundedReader(source, 5)
-            return await bounded.read()
-
-        assert run_async(read_it()) == b"hello"
-
-    def test_ends_early_if_the_source_does(self):
-        """A source that ends before delivering `limit` bytes isn't an
-        error - the bounded reader just ends up shorter than `limit`, same
-        as a real connection closing early."""
-
-        async def read_it() -> bytes:
-            source = BufferedReader.for_bytes(b"short")
-            bounded = BoundedReader(source, 999)
-            return await bounded.read()
-
-        assert run_async(read_it()) == b"short"
-
-    def test_fires_on_exhausted_once_the_limit_is_reached(self):
-        """The callback fires exactly once, once the limit's worth of
-        bytes has been pumped through."""
-
-        async def read_it() -> int:
-            calls = 0
-
-            def on_exhausted() -> None:
-                nonlocal calls
-                calls += 1
-
-            source = BufferedReader.for_bytes(b"hello world")
-            bounded = BoundedReader(source, 5, on_exhausted=on_exhausted)
-            await bounded.read()
-            return calls
-
-        assert run_async(read_it()) == 1
-
-    def test_fires_on_exhausted_even_if_the_source_ends_early(self):
-        """The callback still fires exactly once when the source ends
-        before the limit - "exhausted" means the pump is done, not
-        specifically that the limit was reached."""
-
-        async def read_it() -> int:
-            calls = 0
-
-            def on_exhausted() -> None:
-                nonlocal calls
-                calls += 1
-
-            source = BufferedReader.for_bytes(b"short")
-            bounded = BoundedReader(source, 999, on_exhausted=on_exhausted)
-            await bounded.read()
-            return calls
-
-        assert run_async(read_it()) == 1
-
-    def test_fires_on_exhausted_regardless_of_who_reads(self):
-        """The pump runs as a background task independent of any
-        particular caller's reads - the callback fires even if nothing
-        ever calls `.read()` on the bounded reader itself, as long as the
-        pump gets a chance to run."""
-
-        async def run_it() -> int:
-            calls = 0
-
-            def on_exhausted() -> None:
-                nonlocal calls
-                calls += 1
-
-            source = BufferedReader.for_bytes(b"hello")
-            bounded = BoundedReader(source, 5, on_exhausted=on_exhausted)
-            await bounded._pump_task
-            return calls
-
-        assert run_async(run_it()) == 1
-
-    def test_at_eof_reflects_the_cutoff_not_the_source(self):
-        """`at_eof()` follows the bounded reader's own state - once it's
-        drained up to the cutoff, it reports EOF even if the underlying
-        source object still has data left in it that just never got
-        pumped through."""
-
-        async def read_it() -> bool:
-            source = BufferedReader.for_bytes(b"hello world")
-            bounded = BoundedReader(source, 5)
-            await bounded.read()
-            return bounded.at_eof()
-
-        assert run_async(read_it()) is True
+    def test_wait_closed_returns_immediately(self):
+        """`feed_eof()` already happened by construction, so `wait_closed()`
+        never actually suspends."""
+        reader = BufferedReader.for_bytes(b"hello")
+        assert run_async(reader.wait_closed()) is None

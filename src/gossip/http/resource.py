@@ -7,7 +7,6 @@ from typing import Any, Self
 
 from gossip.http.predicate import RequestPredicate
 from gossip.internet.uri import URI
-from gossip.network.serializer import BoundedReader
 from gossip.utils.multidict import multidict
 
 log = logging.getLogger(__name__)
@@ -16,30 +15,20 @@ log.setLevel(logging.DEBUG)
 
 class Resource:
     """A representation of the specific resource carried by an HTTP
-    message: the URL identifying it, its headers, a readable body, and
-    trailers - ready for async reading.
+    message: the URL identifying it, its headers, and a readable body.
 
-    `body` is always a `BoundedReader`; read it directly for streaming
-    access, or call `read_body()` to materialize the whole thing into a
-    `Buffer`. `trailers` is a `Future` that resolves once `body`'s pump
-    finishes; `await` it (or add a done callback) rather than reading it
-    synchronously.
+    `body` is used exactly as given - unbounded, with no `Content-Length`
+    cutoff applied here (that used to come from wrapping it in a
+    `BoundedReader`, which this class no longer does).
 
-    Whether `body` is actually bounded is exactly `Content-Length`'s
-    presence: a valid header makes this standards-compliant - `body` cuts
-    off at exactly that many bytes, and `trailers` resolves to empty the
-    moment it does, regardless of who's reading `body`, and regardless of
-    whatever `trailers` value was passed in above. That's not a
-    simplification; `Content-Length` and trailers are mutually exclusive
-    in HTTP (RFC 9112 §6.3), so a Content-Length-bounded body provably has
-    none. Without a valid `Content-Length`, `body` pumps until the given
-    reader ends on its own (unbounded - trusting the source to end by
-    closing), and `trailers` resolves to the value passed in above once
-    it does.
+    `trailers` is a `Future`, but nothing in this class resolves it right
+    now - how trailers should actually work here is still being figured
+    out, so this is deliberately left incomplete rather than wired up to
+    a design that's about to change again. The `trailers` constructor
+    argument is accepted but currently unused for the same reason.
 
     Requires a running event loop to construct: `trailers` is a real
-    `Future` bound to one from the start, and `body`'s `BoundedReader`
-    starts its pump task immediately.
+    `Future` bound to one from the start.
     """
 
     identifier: URI
@@ -50,40 +39,17 @@ class Resource:
     def __init__(self, identifier: URI, headers: Mapping[str, str], body: StreamReader, trailers: Mapping[str, str] | None = None):
         self.identifier = identifier
         self.headers = multidict(headers)
+        self.body = body
         self.trailers = get_running_loop().create_future()
-
-        content_length_str = self.headers.get("Content-Length")
-        content_length = None
-        if content_length_str is not None:
-            try:
-                content_length = int(content_length_str)
-            except ValueError:
-                content_length = None
-
-        # Content-Length's presence or absence is exactly the
-        # standards-compliant signal for whether trailers can exist at
-        # all (RFC 9112 §6.3) - present, there's provably none regardless
-        # of what was passed in as `trailers` above; absent, whatever was
-        # passed in is what `trailers` eventually resolves to.
-        self._pending_trailers = multidict() if content_length is not None else multidict(trailers or {})
-        self.body = BoundedReader(body, content_length, on_exhausted=self._resolve_trailers)
-
-    def _resolve_trailers(self) -> None:
-        if not self.trailers.done():
-            self.trailers.set_result(self._pending_trailers)
 
     async def read_body(self) -> Buffer | None:
         """Materializes this resource's body into a `Buffer` by reading
-        `body` until EOF - bounded or not, `trailers` resolves on its own
-        once `body`'s pump finishes, whether or not this was what
-        triggered it.
+        `body` until EOF.
 
-        For a `Content-Length`-bounded `body`, that's the right call for a
-        caller that wants the whole thing as one `Buffer` and can wait for
-        it. A caller that can't - one that wants to pump a live, unbounded
-        body straight through as it arrives (e.g. an audio stream to
-        speakers), in batches, via its own streaming parser - should read
-        `self.body` directly instead of going through `read_body()`.
+        A caller that wants to pump a live body straight through as it
+        arrives (e.g. an audio stream to speakers), in batches, via its
+        own streaming parser, should read `self.body` directly instead of
+        going through `read_body()`.
         """
         return await self.body.read()
 
