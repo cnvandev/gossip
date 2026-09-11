@@ -63,6 +63,13 @@ class TestUniqueServiceName:
         usn = UniqueServiceName(udn, None)
         assert str(usn) == str(udn)
 
+    def test_repr_matches_str(self):
+        """`repr()` delegates to the same `UDN::target` form as `str()`,
+        overriding the verbose default `NamedTuple` repr."""
+        udn = URI.uuid(UUID(int=1))
+        usn = UniqueServiceName(udn, SSDPTarget.root())
+        assert repr(usn) == str(usn)
+
     def test_parse_round_trips_with_target(self):
         """Parsing a USN's string form, including a target, reproduces the
         original USN."""

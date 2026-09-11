@@ -23,6 +23,19 @@ class TestSemanticVersion:
         assert SemanticVersion.parse("2") == SemanticVersion(2)
 
 
+class TestProductSemver:
+    """`Product.semver()`, which parses a product's version string into a
+    `SemanticVersion` on demand."""
+
+    def test_with_version(self):
+        """A product with a version returns the parsed `SemanticVersion`."""
+        assert Product("Gossip", "1.2.3").semver() == SemanticVersion(1, 2, 3)
+
+    def test_without_version(self):
+        """A product with no version returns `None`, rather than raising."""
+        assert Product("Gossip").semver() is None
+
+
 class TestProductStringForm:
     """Converting a `Product` to and from its `name/version (comment)`
     string form."""

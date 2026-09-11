@@ -1,5 +1,6 @@
 import logging
 import zlib
+from abc import ABC, abstractmethod
 from asyncio import IncompleteReadError
 from asyncio.streams import StreamReader
 from collections.abc import Buffer, Sized
@@ -14,7 +15,7 @@ class ReadableBuffer(Buffer, Sized, Protocol): ...
 log = logging.getLogger(__name__)
 
 
-class EncodedReader(StreamReader):
+class EncodedReader(StreamReader, ABC):
     """A `StreamReader` that decodes a transfer-coding, by reading raw
     bytes off a source `StreamReader` and decoding them for return.
 
@@ -35,6 +36,7 @@ class EncodedReader(StreamReader):
         self.source = source
         self.overflow = b""
 
+    @abstractmethod
     async def decode(self) -> bytes | None:
         """Read a chunk of data off the buffer and return the decoded result,
         or `None` once the coding has permanently finished.
@@ -43,7 +45,7 @@ class EncodedReader(StreamReader):
         to read data from `source`. Some encoding methods have chunking methods
         so this lets subclasses decide exactly how to read data off the wire.
         """
-        raise NotImplementedError
+        ...
 
     @override
     async def read(self, n: int = -1) -> bytes:

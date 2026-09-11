@@ -1,4 +1,5 @@
 import logging
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from collections.abc import Iterable
 
@@ -10,7 +11,7 @@ from gossip.internet.mime import MediaType
 log = logging.getLogger(__name__)
 
 
-class RequestPredicate[T]:
+class RequestPredicate[T](ABC):
     """A predicate to evaluate a few options, ranked by a quality parameter.
 
     If the predicate's `.accepts()` method returns a non-False-y value, the
@@ -23,11 +24,11 @@ class RequestPredicate[T]:
     def __init__(self, options: Iterable[T]):
         self.options = list(options)
 
-    def parse(self, input: str) -> T:
-        raise NotImplementedError("RequestPredicate subclass must implement compare() and parse().")
+    @abstractmethod
+    def parse(self, input: str) -> T: ...
 
-    def compare(self, option: T, acceptable: T) -> bool:
-        raise NotImplementedError("RequestPredicate subclass must implement compare() and parse().")
+    @abstractmethod
+    def compare(self, option: T, acceptable: T) -> bool: ...
 
     def accepts(self, accept_string: str) -> tuple[tuple[T, dict[str, str]], ...]:
         """Return a tuple of all acceptable options in our list (with args).

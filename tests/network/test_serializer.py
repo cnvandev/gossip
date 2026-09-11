@@ -1,7 +1,52 @@
 from asyncio import StreamReader, get_running_loop, sleep
 from asyncio import run as run_async
 
-from gossip.network.serializer import BufferedReader
+from gossip.network.serializer import BufferedReader, Serializable
+
+
+class FakeStreamWriter:
+    """A minimal stand-in for `StreamWriter`, recording what was written
+    and whether the write was drained."""
+
+    def __init__(self):
+        self.written = b""
+        self.drained = False
+
+    def write(self, data: bytes) -> None:
+        self.written += data
+
+    async def drain(self) -> None:
+        self.drained = True
+
+
+class Message(Serializable):
+    """A trivial `Serializable` that doesn't override `write_to()`, so it
+    exercises the default implementation."""
+
+    def __init__(self, data: bytes):
+        self.data = data
+
+    def __bytes__(self) -> bytes:
+        return self.data
+
+
+class TestSerializableWriteTo:
+    """`Serializable.write_to()`'s default implementation - the "dumb"
+    fallback used by anything that doesn't override it, which just writes
+    `bytes(self)` and drains."""
+
+    def test_writes_bytes_and_drains(self):
+        """The full `bytes()` form is written to the writer in one call,
+        and the write is drained before returning."""
+
+        async def write_it() -> FakeStreamWriter:
+            writer = FakeStreamWriter()
+            await Message(b"hello").write_to(writer)
+            return writer
+
+        writer = run_async(write_it())
+        assert writer.written == b"hello"
+        assert writer.drained is True
 
 
 class TestBufferedReader:
