@@ -78,10 +78,10 @@ class Radio:
         return (address for interface in self.interfaces.values() for address in interface.addresses())
 
     @classmethod
-    def loopback(cls) -> Self:
+    def loopback(cls, **kwargs) -> Self:
         """A `Radio` bound only to loopback (127.0.0.1) - useful for local
         testing, without needing any real network interfaces."""
-        return cls((Interface("lo0", {AF_INET: (Binding(IPv4Address("127.0.0.1")),)}),))
+        return cls((Interface("lo0", {AF_INET: (Binding(IPv4Address("127.0.0.1"), **kwargs),)}),))
 
     @classmethod
     def from_netifaces(cls, interfaces: tuple[str, ...] = INTERFACES, address_families: tuple[int, ...] = ADDRESS_FAMILIES) -> Self:

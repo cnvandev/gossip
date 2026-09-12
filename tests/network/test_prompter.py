@@ -260,7 +260,7 @@ class TestPrompterBroadcastPrompt:
         """A reply sent back to the broadcasting socket's own address is
         deserialized and streamed."""
         loop = asyncio.get_running_loop()
-        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=None),)}),))
+        radio = Radio.loopback(broadcast=None)
 
         responder_transport, _ = await loop.create_datagram_endpoint(lambda: StaticReplyProtocol(bytes(HTTPResponse(HTTPStatus.OK))), local_addr=(str(LOOPBACK), 0))
         with contextlib.closing(responder_transport):
@@ -277,7 +277,7 @@ class TestPrompterBroadcastPrompt:
         """With a `tcp_port`, replies are read from TCP connections to
         that port instead of the broadcasting UDP socket."""
         loop = asyncio.get_running_loop()
-        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=None),)}),))
+        radio = Radio.loopback(broadcast=None)
 
         class Responder(asyncio.DatagramProtocol):
             def connection_made(self, transport):
