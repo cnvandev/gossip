@@ -1,5 +1,3 @@
-from asyncio import run as run_async
-
 from gossip.internet.mime import MediaType
 from gossip.internet.uri import URI
 from gossip.network.serializer import BufferedReader
@@ -45,19 +43,19 @@ class TestXMLSerializableRoundTrip:
     """Round-tripping an `XMLSerializable` dataclass through `to_xml()` and
     `from_xml()`."""
 
-    def test_simple_dataclass_round_trips(self):
+    async def test_simple_dataclass_round_trips(self):
         """A dataclass of plain fields serializes to XML and parses back to
         an equal instance."""
         version = Version(major=1, minor=0)
-        parsed = run_async(Version.from_xml(BufferedReader.for_bytes(version.to_xml().encode())))
+        parsed = await Version.from_xml(BufferedReader.for_bytes(version.to_xml().encode()))
         assert parsed == version
 
-    def test_uri_and_media_type_fields_round_trip_as_their_real_types(self):
+    async def test_uri_and_media_type_fields_round_trip_as_their_real_types(self):
         """Fields typed as `URI`/`MediaType` come back as those types, not
         as plain strings, since the registered converters are used during
         parsing too."""
         icon = Icon(mimetype=MediaType.image("png"), width=32, height=32, depth=24, url=URI.parse("/icon.png"))
-        parsed = run_async(Icon.from_xml(BufferedReader.for_bytes(icon.to_xml().encode())))
+        parsed = await Icon.from_xml(BufferedReader.for_bytes(icon.to_xml().encode()))
         assert parsed == icon
         assert isinstance(parsed.url, URI)
         assert isinstance(parsed.mimetype, MediaType)

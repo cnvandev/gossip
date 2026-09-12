@@ -1,4 +1,3 @@
-from asyncio import run as run_async
 from http import HTTPMethod
 from ipaddress import IPv4Address
 
@@ -153,28 +152,28 @@ class TestExtensionAccess:
     """`Extension.access()` - marks a successful response with the empty
     `Ext` header, then delegates to the normal `HTTPAccessor` dispatch."""
 
-    def test_adds_the_ext_header_to_the_response(self):
+    async def test_adds_the_ext_header_to_the_response(self):
         """A successful response always carries the empty `Ext` header."""
         resource = InMemoryResource(b"hi")
         extension = Extension("my-ext")
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(extension.access(resource, request, {}, {}, REMOTE, LOCAL))
+        (response,) = await extension.access(resource, request, {}, {}, REMOTE, LOCAL)
         assert response.headers["Ext"] == ""
 
-    def test_keeps_the_other_static_headers_given(self):
+    async def test_keeps_the_other_static_headers_given(self):
         """Adding `Ext` doesn't crowd out other static headers."""
         resource = InMemoryResource()
         extension = Extension("my-ext")
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(extension.access(resource, request, {}, {"Server": "gossip"}, REMOTE, LOCAL))
+        (response,) = await extension.access(resource, request, {}, {"Server": "gossip"}, REMOTE, LOCAL)
         assert response.headers["Server"] == "gossip"
         assert response.headers["Ext"] == ""
 
-    def test_still_dispatches_by_method_like_a_plain_accessor(self):
+    async def test_still_dispatches_by_method_like_a_plain_accessor(self):
         """A `GET` still reaches the resource's real representation."""
         resource = InMemoryResource(b"hi")
         extension = Extension("my-ext")
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(extension.access(resource, request, {}, {}, REMOTE, LOCAL))
+        (response,) = await extension.access(resource, request, {}, {}, REMOTE, LOCAL)
         assert response.body is not None
-        assert run_async(response.body.read()) == b"hi"
+        assert await response.body.read() == b"hi"

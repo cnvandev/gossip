@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import struct
 from asyncio import StreamReader
-from asyncio import run as run_async
 from datetime import timedelta
 from ipaddress import IPv4Address
 from unittest.mock import patch
@@ -116,35 +115,31 @@ class TestDNSMessageReadFrom:
     """Parsing a `DNSMessage` back from its wire bytes, given as a
     `(bytes, Endpoint)` pair rather than a live stream."""
 
-    def test_round_trips_a_serialized_message(self):
+    async def test_round_trips_a_serialized_message(self):
         """A message serialized with `bytes()` parses back into an
         equivalent message via `read_from()`."""
         original = DNSMessage.query("example.com", RecordType.A)
         original.answers.append(Record.address("example.com", IPv4Address("1.2.3.4"), timedelta(seconds=300)))
 
-        parsed = run_async(DNSMessage.read_from((bytes(original), ENDPOINT)))
+        parsed = await DNSMessage.read_from((bytes(original), ENDPOINT))
 
         assert parsed is not None
         assert parsed.transaction_id == original.transaction_id
         assert parsed.questions == original.questions
         assert parsed.answers == original.answers
 
-    def test_reads_from_a_live_stream_reader_too(self):
+    async def test_reads_from_a_live_stream_reader_too(self):
         """The other accepted input, a real `asyncio.StreamReader`, is read
         to EOF and parsed the same way as the `(bytes, Endpoint)` form."""
-
-        async def read_it() -> DNSMessage | None:
-            original = DNSMessage.query("example.com", RecordType.A)
-            reader = StreamReader()
-            reader.feed_data(bytes(original))
-            reader.feed_eof()
-            return await DNSMessage.read_from(reader)
-
-        parsed = run_async(read_it())
+        original = DNSMessage.query("example.com", RecordType.A)
+        reader = StreamReader()
+        reader.feed_data(bytes(original))
+        reader.feed_eof()
+        parsed = await DNSMessage.read_from(reader)
         assert parsed is not None
         assert parsed.questions == [Question.domain("example.com", RecordType.A)]
 
-    def test_flags_and_codes_round_trip(self):
+    async def test_flags_and_codes_round_trip(self):
         """Every boolean flag and both codes survive a serialize/parse
         round trip."""
         original = DNSMessage(
@@ -158,7 +153,7 @@ class TestDNSMessageReadFrom:
             response_code=ResponseCode.NAME_ERROR,
             operation_code=OpCode.UPDATE,
         )
-        parsed = run_async(DNSMessage.read_from((bytes(original), ENDPOINT)))
+        parsed = await DNSMessage.read_from((bytes(original), ENDPOINT))
 
         assert parsed is not None
         assert (
@@ -173,18 +168,18 @@ class TestDNSMessageReadFrom:
             parsed.operation_code,
         ) == (True, True, True, True, True, True, True, ResponseCode.NAME_ERROR, OpCode.UPDATE)
 
-    def test_returns_none_for_too_short_a_buffer(self):
+    async def test_returns_none_for_too_short_a_buffer(self):
         """Data too short to even hold the fixed header fails cleanly with
         `None`, rather than letting the underlying `struct`/`IndexError`
         propagate."""
-        assert run_async(DNSMessage.read_from((b"\x00\x01", ENDPOINT))) is None
+        assert await DNSMessage.read_from((b"\x00\x01", ENDPOINT)) is None
 
-    def test_returns_none_when_a_section_count_lies(self):
+    async def test_returns_none_when_a_section_count_lies(self):
         """A header claiming more entries than the buffer actually holds
         fails cleanly with `None`."""
         message = DNSMessage.query("example.com")
         data = bytes(message)[:12] + b"\xff\xff"  # qdcount replaced with a huge lie, no question data follows
-        assert run_async(DNSMessage.read_from((data, ENDPOINT))) is None
+        assert await DNSMessage.read_from((data, ENDPOINT)) is None
 
 
 class TestDNSMessageTSIGSigning:

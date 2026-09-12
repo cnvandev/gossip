@@ -15,6 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov>=7.0.0",
     "pytest-fixtures>=0.1.0",
 ]
@@ -30,3 +31,4 @@ package-dir = {"" = "src"}
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 addopts = "--cov=gossip"
+asyncio_mode = "auto"

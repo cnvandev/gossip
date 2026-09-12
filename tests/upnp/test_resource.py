@@ -1,4 +1,3 @@
-from asyncio import run as run_async
 from uuid import UUID
 
 from gossip.internet.uri import URI
@@ -109,22 +108,22 @@ class TestUPnPDeviceRepresent:
     """`UPnPDevice.represent()` - serializes the device's `DeviceSpec` to
     XML bytes, for a `GET`/`HEAD` on its description document."""
 
-    def test_returns_the_specs_xml_as_the_body(self):
+    async def test_returns_the_specs_xml_as_the_body(self):
         """The body is the spec's serialized XML, with matching metadata."""
         device = DummyDevice("mydevice", udn=UDN)
         resource = UPnPDevice(device)
         exact_uri = URI.parse("http://10.0.0.1:80/device.xml")
         expected = resource.get_spec(url_base=exact_uri).to_xml().encode("utf-8")
 
-        body, metadata = run_async(resource.represent(exact_uri, {}))
-        assert run_async(body.read()) == expected
+        body, metadata = await resource.represent(exact_uri, {})
+        assert await body.read() == expected
         assert metadata == {"Content-Type": "application/xml", "Content-Length": str(len(expected))}
 
-    def test_uses_the_requested_uri_as_the_specs_url_base(self):
+    async def test_uses_the_requested_uri_as_the_specs_url_base(self):
         """The requested URI becomes the spec's `URLBase`."""
         device = DummyDevice("mydevice", udn=UDN)
         resource = UPnPDevice(device)
         exact_uri = URI.parse("http://10.0.0.1:80/device.xml")
-        body, _metadata = run_async(resource.represent(exact_uri, {}))
-        xml = run_async(body.read()).decode("utf-8")
+        body, _metadata = await resource.represent(exact_uri, {})
+        xml = (await body.read()).decode("utf-8")
         assert str(exact_uri) in xml

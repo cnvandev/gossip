@@ -1,5 +1,4 @@
 from asyncio import StreamReader, get_running_loop, sleep
-from asyncio import run as run_async
 from typing import Self
 
 from gossip.network.endpoint import Endpoint
@@ -27,15 +26,10 @@ class TestSerializableWriteTo:
     """`Serializable.write_to()`'s default implementation - writes
     `bytes(self)` and drains."""
 
-    def test_writes_bytes_and_drains(self):
+    async def test_writes_bytes_and_drains(self):
         """The full `bytes()` form is written and the write is drained."""
-
-        async def write_it() -> FakeStreamWriter:
-            writer = FakeStreamWriter()
-            await Message(b"hello").write_to(writer)
-            return writer
-
-        writer = run_async(write_it())
+        writer = FakeStreamWriter()
+        await Message(b"hello").write_to(writer)
         assert bytes(writer.buffer) == b"hello"
         assert writer.drained is True
 
@@ -52,31 +46,23 @@ class TestBufferedReader:
         reader.feed_eof()
         assert isinstance(reader, StreamReader)
 
-    def test_yields_exactly_the_fed_bytes(self):
+    async def test_yields_exactly_the_fed_bytes(self):
         """Reading it back returns exactly what was fed, then EOF."""
+        reader = BufferedReader()
+        reader.feed_data(b"hello")
+        reader.feed_eof()
+        assert await reader.read() == b"hello"
 
-        async def read_it() -> bytes:
-            reader = BufferedReader()
-            reader.feed_data(b"hello")
-            reader.feed_eof()
-            return await reader.read()
-
-        assert run_async(read_it()) == b"hello"
-
-    def test_wait_closed_blocks_until_feed_eof(self):
+    async def test_wait_closed_blocks_until_feed_eof(self):
         """`wait_closed()` suspends until `feed_eof()` is called."""
+        reader = BufferedReader()
+        wait_task = get_running_loop().create_task(reader.wait_closed())
+        await sleep(0)
+        not_yet_closed = not wait_task.done()
 
-        async def check() -> bool:
-            reader = BufferedReader()
-            wait_task = get_running_loop().create_task(reader.wait_closed())
-            await sleep(0)
-            not_yet_closed = not wait_task.done()
-
-            reader.feed_eof()
-            await wait_task
-            return not_yet_closed
-
-        assert run_async(check()) is True
+        reader.feed_eof()
+        await wait_task
+        assert not_yet_closed is True
 
 
 class TestBufferedReaderForBytes:
@@ -89,16 +75,12 @@ class TestBufferedReaderForBytes:
         reader = BufferedReader.for_bytes(b"hi")
         assert isinstance(reader, StreamReader)
 
-    def test_yields_exactly_the_given_bytes(self):
+    async def test_yields_exactly_the_given_bytes(self):
         """Reading it back returns exactly the bytes it was built from."""
+        reader = BufferedReader.for_bytes(b"hello")
+        assert await reader.read() == b"hello"
 
-        async def read_it() -> bytes:
-            reader = BufferedReader.for_bytes(b"hello")
-            return await reader.read()
-
-        assert run_async(read_it()) == b"hello"
-
-    def test_wait_closed_returns_immediately(self):
+    async def test_wait_closed_returns_immediately(self):
         """Already fed and EOF'd by construction, so this never suspends."""
         reader = BufferedReader.for_bytes(b"hello")
-        assert run_async(reader.wait_closed()) is None
+        assert await reader.wait_closed() is None

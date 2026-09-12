@@ -1,4 +1,3 @@
-from asyncio import run as run_async
 from datetime import UTC, datetime
 from http import HTTPMethod, HTTPStatus
 from ipaddress import IPv4Address
@@ -150,10 +149,10 @@ class TestHTTPResponderSubcollections:
 class TestHTTPResponderRepresent:
     """The responder's own `*`-path representation, which is always empty."""
 
-    def test_always_returns_no_body_and_no_metadata(self):
+    async def test_always_returns_no_body_and_no_metadata(self):
         """Always empty, regardless of the URI or constraints passed in."""
         responder = HTTPResponder({})
-        result = run_async(responder.represent(STAR_PATH, {}))
+        result = await responder.represent(STAR_PATH, {})
         assert result == (None, {})
 
 
@@ -161,10 +160,10 @@ class TestHTTPResponderOptions:
     """`HTTPResponder.options()` - reports the accessor's methods as an
     `Allow` header."""
 
-    def test_allow_lists_every_method_the_accessor_handles(self):
+    async def test_allow_lists_every_method_the_accessor_handles(self):
         """`Allow` enumerates the accessor's own six standard methods."""
         responder = HTTPResponder({})
-        result = run_async(responder.options(STAR_PATH, {}))
+        result = await responder.options(STAR_PATH, {})
         assert result == {"Allow": "GET, PUT, PATCH, DELETE, HEAD, OPTIONS"}
 
 
@@ -173,14 +172,14 @@ class TestHTTPResponderRespond:
     identify the target resource, check it can be represented under the
     request's constraints, and dispatch to the accessor."""
 
-    def test_unknown_target_is_reported_as_not_found(self):
+    async def test_unknown_target_is_reported_as_not_found(self):
         """A request for an unknown URI gets a plain `404`."""
         responder = HTTPResponder({})
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.NOT_FOUND
 
-    def test_a_lookup_error_is_reported_via_unidentifiable(self):
+    async def test_a_lookup_error_is_reported_via_unidentifiable(self):
         """An error looking up the target is classified by exception type,
         the same as a missing target."""
 
@@ -191,10 +190,10 @@ class TestHTTPResponderRespond:
         responder = HTTPResponder({})
         responder.resources = RaisingResources()
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.BAD_REQUEST
 
-    def test_no_responses_at_all_is_handled_without_erroring(self):
+    async def test_no_responses_at_all_is_handled_without_erroring(self):
         """A subclass giving no response at all doesn't break `respond()`."""
 
         class SilentResponder(HTTPResponder):
@@ -203,99 +202,99 @@ class TestHTTPResponderRespond:
 
         responder = SilentResponder({})
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        responses = run_async(responder.respond(request, REMOTE, LOCAL))
+        responses = await responder.respond(request, REMOTE, LOCAL)
         assert tuple(responses) == ()
 
-    def test_a_known_target_is_dispatched_through_the_accessor(self):
+    async def test_a_known_target_is_dispatched_through_the_accessor(self):
         """A `GET` for a registered resource returns its representation."""
         resource = InMemoryResource(b"hi", {"Content-Type": "text/plain"})
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest(HTTPMethod.GET, TARGET)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.OK
         assert response.body is not None
-        assert run_async(response.body.read()) == b"hi"
+        assert await response.body.read() == b"hi"
         assert response.headers["Content-Type"] == "text/plain"
 
-    def test_response_headers_include_the_responders_default_headers(self):
+    async def test_response_headers_include_the_responders_default_headers(self):
         """Static headers and a fresh `Date` are merged into every response."""
         resource = InMemoryResource()
         responder = HTTPResponder({TARGET: resource}, static_headers={"X-Custom": "yes"})
         request = HTTPRequest(HTTPMethod.OPTIONS, TARGET)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.headers["X-Custom"] == "yes"
         assert "Date" in response.headers
 
-    def test_an_ip_host_header_is_merged_into_a_netloc_less_targets_identifier(self):
+    async def test_an_ip_host_header_is_merged_into_a_netloc_less_targets_identifier(self):
         """A netloc-less target's identifier picks up an IP `Host` header."""
         located = URI.parse("/thing")._replace(netloc="239.255.255.250")
         resource = InMemoryResource()
         responder = HTTPResponder({located: resource})
         request = HTTPRequest(HTTPMethod.GET, TARGET, {"Host": "239.255.255.250"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.OK
 
-    def test_a_non_ip_host_header_does_not_change_the_lookup(self):
+    async def test_a_non_ip_host_header_does_not_change_the_lookup(self):
         """A hostname (rather than an IP) `Host` header is left as-is."""
         located = URI.parse("/thing")._replace(netloc="example.com")
         resource = InMemoryResource()
         responder = HTTPResponder({located: resource})
         request = HTTPRequest(HTTPMethod.GET, TARGET, {"Host": "example.com"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.NOT_FOUND
 
-    def test_a_target_with_its_own_netloc_ignores_the_host_header(self):
+    async def test_a_target_with_its_own_netloc_ignores_the_host_header(self):
         """A target URI with its own netloc ignores the `Host` header."""
         full_target = URI.parse("http://example.com/thing")
         resource = InMemoryResource()
         responder = HTTPResponder({full_target: resource})
         request = HTTPRequest(HTTPMethod.GET, full_target, {"Host": "9.9.9.9"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.OK
 
-    def test_a_fully_rejected_header_is_reported_as_unsatisfiable(self):
+    async def test_a_fully_rejected_header_is_reported_as_unsatisfiable(self):
         """A header matching none of the resource's options is rejected
         with the matching status, without reaching the accessor."""
         resource = InMemoryResource(b"hi", predicates={"Accept": StringPredicate(["text/plain"])})
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest(HTTPMethod.GET, TARGET, {"Accept": "application/json"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
 
-    def test_a_satisfied_header_is_dispatched_normally(self):
+    async def test_a_satisfied_header_is_dispatched_normally(self):
         """A header matching one of the resource's options reaches its
         real representation."""
         resource = InMemoryResource(b"hi", predicates={"Accept": StringPredicate(["text/plain"])})
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest(HTTPMethod.GET, TARGET, {"Accept": "text/plain"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.OK
         assert response.body is not None
-        assert run_async(response.body.read()) == b"hi"
+        assert await response.body.read() == b"hi"
 
-    def test_trace_echoes_the_request_body_back(self):
+    async def test_trace_echoes_the_request_body_back(self):
         """`TRACE` sends the request's body back as `message/http`."""
         body = BufferedReader.for_bytes(b"echo me")
         resource = InMemoryResource()
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest(HTTPMethod.TRACE, TARGET, body=body)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.OK
         assert response.body is body
         assert response.headers["Content-Type"] == "message/http"
 
-    def test_trace_with_content_length_is_rejected(self):
+    async def test_trace_with_content_length_is_rejected(self):
         """RFC 9110 §9.3.8: a `TRACE` request must not carry content."""
         resource = InMemoryResource()
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest(HTTPMethod.TRACE, TARGET, {"Content-Length": "4"})
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.BAD_REQUEST
 
-    def test_an_unknown_method_is_reported_as_not_allowed(self):
+    async def test_an_unknown_method_is_reported_as_not_allowed(self):
         """A method with no handler at all gets a plain `405`."""
         resource = InMemoryResource()
         responder = HTTPResponder({TARGET: resource})
         request = HTTPRequest("FROBNICATE", TARGET)
-        (response,) = run_async(responder.respond(request, REMOTE, LOCAL))
+        (response,) = await responder.respond(request, REMOTE, LOCAL)
         assert response.status == HTTPStatus.METHOD_NOT_ALLOWED

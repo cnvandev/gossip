@@ -1,4 +1,3 @@
-from asyncio import run as run_async
 from pathlib import Path
 from uuid import UUID
 
@@ -27,21 +26,21 @@ class TestServiceTargets:
 class TestDeviceExtensionsIn:
     """Querying a `Device`'s vendor XML extensions by namespace."""
 
-    def _device_with_dlna_extensions(self) -> Device:
+    async def _device_with_dlna_extensions(self) -> Device:
         xml = (DATA_DIR / "device_with_dlna_extensions.xml").read_text()
-        return run_async(Device.from_xml(BufferedReader.for_bytes(xml.encode())))
+        return await Device.from_xml(BufferedReader.for_bytes(xml.encode()))
 
-    def test_returns_elements_in_the_matching_namespace(self):
+    async def test_returns_elements_in_the_matching_namespace(self):
         """An extension element from the requested namespace is returned,
         with its text content intact."""
-        device = self._device_with_dlna_extensions()
+        device = await self._device_with_dlna_extensions()
         (extension,) = device.extensions_in(URI.urn("schemas-dlna-org:device-1-0"))
         assert extension.text == "DMS-1.50"
 
-    def test_returns_empty_for_a_namespace_with_no_extensions(self):
+    async def test_returns_empty_for_a_namespace_with_no_extensions(self):
         """A namespace the device has no extensions in returns an empty
         tuple rather than raising."""
-        device = self._device_with_dlna_extensions()
+        device = await self._device_with_dlna_extensions()
         assert device.extensions_in(URI.urn("schemas-other-org:device-1-0")) == ()
 
     def test_device_with_no_extensions_returns_empty(self):

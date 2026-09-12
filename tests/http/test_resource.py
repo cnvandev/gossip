@@ -1,5 +1,3 @@
-from asyncio import run as run_async
-
 from gossip.http.predicate import StringPredicate
 from gossip.http.resource import Resource, ResourceCollection
 from gossip.internet.uri import URI
@@ -27,15 +25,15 @@ class TestResourceConstruction:
 class TestResourceReadBody:
     """`read_body()` - materializes a resource's body into a `Buffer`."""
 
-    def test_reads_the_whole_body(self):
+    async def test_reads_the_whole_body(self):
         """Reads the entire body content into a single `Buffer`."""
         resource = Resource(TARGET, {}, BufferedReader.for_bytes(b"hello world"))
-        assert run_async(resource.read_body()) == b"hello world"
+        assert await resource.read_body() == b"hello world"
 
-    def test_empty_body_reads_nothing(self):
+    async def test_empty_body_reads_nothing(self):
         """An empty body reads back as empty."""
         resource = Resource(TARGET, {}, BufferedReader.for_bytes(b""))
-        assert run_async(resource.read_body()) == b""
+        assert await resource.read_body() == b""
 
 
 class TestResourceCollectionIsRepresentable:
