@@ -1,5 +1,4 @@
 import logging
-from asyncio import Future, get_running_loop
 from asyncio.streams import StreamReader
 from collections import UserDict
 from collections.abc import Buffer, Mapping
@@ -20,27 +19,16 @@ class Resource:
     `body` is used exactly as given - unbounded, with no `Content-Length`
     cutoff applied here (that used to come from wrapping it in a
     `BoundedReader`, which this class no longer does).
-
-    `trailers` is a `Future`, but nothing in this class resolves it right
-    now - how trailers should actually work here is still being figured
-    out, so this is deliberately left incomplete rather than wired up to
-    a design that's about to change again. The `trailers` constructor
-    argument is accepted but currently unused for the same reason.
-
-    Requires a running event loop to construct: `trailers` is a real
-    `Future` bound to one from the start.
     """
 
     identifier: URI
     headers: multidict
     body: StreamReader
-    trailers: Future[multidict]
 
-    def __init__(self, identifier: URI, headers: Mapping[str, str], body: StreamReader, trailers: Mapping[str, str] | None = None):
+    def __init__(self, identifier: URI, headers: Mapping[str, str], body: StreamReader):
         self.identifier = identifier
         self.headers = multidict(headers)
         self.body = body
-        self.trailers = get_running_loop().create_future()
 
     async def read_body(self) -> Buffer | None:
         """Materializes this resource's body into a `Buffer` by reading
@@ -83,9 +71,15 @@ class ResourceCollection(UserDict[str, dict[str, str]]):
         self.predicates = predicates
         super().__init__(data)
 
-    def is_representable(self, request_headers: Mapping[str, str]) -> dict[str, tuple[Any, dict[str, str]]]:
-        """Returns the output of each predicate against the request headers."""
-        return {header: next(iter(predicate.accepts(request_headers.get(header, ""))), None) for header, predicate in self.predicates.items() if header in request_headers}
+    def is_representable(self, request_headers: Mapping[str, str]) -> dict[str, tuple[Any, Mapping[str, str]]]:
+        """Returns the output of each predicate against the request headers.
+
+        Each value is a tuple of (result, params) where result is some chosen
+        representation option and params is a dict of representation parameters
+        (i.e. codec settings, etc.) If the predicate rejects the request,
+        the option is `False`y.
+        """
+        return {header: next(iter(predicate.accepts(request_headers.get(header, ""))), (None, {})) for header, predicate in self.predicates.items() if header in request_headers}
 
     def subcollections(self) -> Mapping[URI, Self]:
         """Return a mapping of collections in this resource, if any.

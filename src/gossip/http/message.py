@@ -1,4 +1,5 @@
 import logging
+from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader, StreamWriter
 from collections.abc import Iterable, Mapping
 from http import HTTPStatus
@@ -18,7 +19,7 @@ log = logging.getLogger(__name__)
 HTTP_PROTOCOL: Product = Product("HTTP", str(1.1))
 
 
-class HTTPMessage:
+class HTTPMessage(ABC):
     """An HTTP message including a start line, headers, and optional body & trailers.
 
     This wraps a canonical `InternetMessage` (available via`self.message`),
@@ -28,6 +29,10 @@ class HTTPMessage:
     message parsed via `read_from()`, `body` has already been decoded
     according to `Transfer-Encoding` (see `choose_encoding()`) before it
     ever reaches the constructor.
+
+    Abstract - only ever meant to be built as a `HTTPRequest` or
+    `HTTPResponse`, each of which assembles its own `start_line` before
+    delegating here via `super().__init__()`.
     """
 
     """The underlying message this was built from."""
@@ -36,6 +41,7 @@ class HTTPMessage:
     """A readable message body, or `None` if none was included."""
     body: StreamReader | None
 
+    @abstractmethod
     def __init__(self, start_line: Iterable[str], headers: Mapping[str, str] | None = None, body: StreamReader | None = None, trailers: Mapping[str, str] | None = None):
         self.message = InternetMessage(tuple(start_line), headers or {}, body, trailers)
         self.body = body

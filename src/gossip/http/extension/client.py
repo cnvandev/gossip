@@ -27,7 +27,7 @@ class ExtendedHTTPClient(HTTPClient):
 
         # If there are any hop-by-hop headers, we'll put them in the Connection header.
         connection = headers.pop("Connection", "")
-        connection_headers = list(map(str.strip, connection.split(",")))
+        connection_headers = list(map(str.strip, connection.split(","))) if connection else []
 
         # To mark the request as mandatory, the method gets prefixed with `M-`.
         if Strength.MANDATORY in extended_headers:
@@ -66,7 +66,7 @@ class ExtendedHTTPClient(HTTPClient):
 
                 # Add the hop-by-hop declaration key to the `Connection` header.
                 if scope == Scope.HOP_BY_HOP:
-                    connection_headers.extend(declaration_key)
+                    connection_headers.append(declaration_key)
 
         if connection_headers:
             headers["Connection"] = ", ".join(connection_headers)

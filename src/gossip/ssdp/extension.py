@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Iterable, Mapping
+from collections.abc import Mapping
 from http import HTTPStatus
 from typing import Any
 
@@ -26,7 +26,7 @@ class DiscoverExtension(Extension):
             scope=Scope.END_TO_END,
         )
 
-    async def search(self, resource: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], response_headers: Mapping[str, str], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
+    async def search(self, resource: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], response_headers: Mapping[str, str], remote: Endpoint, local: Endpoint) -> tuple[HTTPResponse, ...]:
         """Create an appropriate response to a `SEARCH` request.
 
         The target resource for the request is always `*` according to the spec,
@@ -38,12 +38,18 @@ class DiscoverExtension(Extension):
         log.info("Remote: %s", remote)
         log.info("Local: %s", local)
 
-        # ST header contains the search target
+        # ST header contains the search target - parsed just to confirm it's a
+        # well-formed URI, matched below as a string against `target` (itself
+        # a string, not a parsed URI).
         search_target = URI.parse(request.headers.get("ST", ""))
+        string_target = str(search_target)
 
         # We'll return a response for every matching resource in the collection.
-        options = ((uri, target, metadata) for uri, subcollection in resource.subcollections().items() for target, metadata in subcollection.items() if all(subcollection.is_representable(request.headers)))
-        matches = ((uri, target, metadata) for uri, target, metadata in options if ((target == search_target) or (search_target == SSDP_ALL)))
+        # Every predicate's result is now an (option, args) pair even on
+        # rejection (option is `None`), so `.values()` is never falsy on its
+        # own - checking the option itself is what tells satisfiability apart.
+        options = ((uri, target, metadata) for uri, subcollection in resource.subcollections().items() for target, metadata in subcollection.items() if all(value for value, _ in subcollection.is_representable(request.headers).values()))
+        matches = ((uri, target, metadata) for uri, target, metadata in options if ((search_target == SSDP_ALL) or (target == string_target)))
 
         # We'll build out the headers for each response.
         responses = (

@@ -261,14 +261,14 @@ class Device(XMLSerializable):
         e.g. DLNA's `urn:schemas-dlna-org:device-1-0`.
         """
         prefix = f"{{{namespace}}}"
-        return tuple(extension for extension in self.extensions if extension.qname.startswith(prefix))
+        return tuple(extension for extension in self.extensions if isinstance(extension, AnyElement) and extension.qname is not None and extension.qname.startswith(prefix))
 
     def targets(self) -> MutableMapping[UniqueServiceName, URI]:
         """Returns a dictionary from USNs to SSDP target URLs they match."""
         # The device is a tree structure, so we'll use a deque to iterate over
         # it and any embedded devices we find (recursively).
         devices = deque((self,) + tuple(self.deviceList or tuple()))
-        output: MutableMapping[UniqueServiceName, SSDPTarget] = {
+        output: MutableMapping[UniqueServiceName, URI] = {
             UniqueServiceName(self.UDN, SSDPTarget.root()): SSDPTarget.root(),
         }
         while devices:

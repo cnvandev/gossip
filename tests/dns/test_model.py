@@ -148,7 +148,7 @@ class TestRecordFactories:
     domain targets, MX, deletion, insertion, and TSIG signing."""
 
     def test_address_picks_type_from_ip_version(self):
-        """`address()` builds an A record for an IPv4 address and an AAAA
+        """`Record.address()` builds an A record for an IPv4 address and an AAAA
         record for IPv6, with the IP packed into rdata."""
         a_record = Record.address("example.com", IPv4Address("1.2.3.4"), TTL)
         assert a_record.rtype == RecordType.A
@@ -159,14 +159,14 @@ class TestRecordFactories:
         assert aaaa_record.decode_ip() == IPv6Address("::1")
 
     def test_domain_target_encodes_target_as_rdata(self):
-        """`domain_target()` builds a record whose rdata is the wire-encoded
+        """`Record.domain_target()` builds a record whose rdata is the wire-encoded
         target domain, for the given record type."""
         record = Record.domain_target("example.com", RecordType.NS, "ns1.example.com", TTL)
         assert record.rtype == RecordType.NS
         assert record.decode_domain() == "ns1.example.com"
 
     def test_mx_encodes_preference_and_target(self):
-        """`mx()` builds an MX record whose rdata is the 2-byte preference
+        """`Record.mx()` builds an MX record whose rdata is the 2-byte preference
         followed by the wire-encoded target domain."""
         record = Record.mx("example.com", 10, "mail.example.com", TTL)
         assert record.decode_mx() == (10, "mail.example.com")

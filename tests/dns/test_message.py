@@ -72,7 +72,7 @@ class TestDNSMessageFactories:
     Update variants."""
 
     def test_query_is_a_single_question_message(self):
-        """`query()` builds a non-response QUERY message with exactly the
+        """`DNSMessage.query()` builds a non-response QUERY message with exactly the
         requested question."""
         message = DNSMessage.query("example.com", RecordType.A)
         assert message.operation_code == OpCode.QUERY
@@ -85,7 +85,7 @@ class TestDNSMessageFactories:
         assert not DNSMessage.query("example.com").is_recursive
 
     def test_update_deletes_then_inserts(self):
-        """`update()` is an RFC 2136 update whose authority section deletes
+        """`DNSMessage.update()` is an RFC 2136 update whose authority section deletes
         the old record before inserting the new one, in that order."""
         message = DNSMessage.update("zone.example.com", "host.example.com", IPv4Address("1.2.3.4"), 300, RecordType.A)
         assert message.operation_code == OpCode.UPDATE
@@ -101,13 +101,13 @@ class TestDNSMessageFactories:
         assert message.authorities[1].ttl == timedelta(seconds=60)
 
     def test_insert_only_inserts(self):
-        """`insert()` is an update with just the insertion, no delete."""
+        """`DNSMessage.insert()` is an update with just the insertion, no delete."""
         message = DNSMessage.insert("zone.example.com", "host.example.com", IPv4Address("1.2.3.4"), 300, RecordType.A)
         assert len(message.authorities) == 1
         assert message.authorities[0].decode_ip() == IPv4Address("1.2.3.4")
 
     def test_delete_only_deletes(self):
-        """`delete()` is an update with just the deletion, no insert."""
+        """`DNSMessage.delete()` is an update with just the deletion, no insert."""
         message = DNSMessage.delete("zone.example.com", "host.example.com", RecordType.A)
         assert message.authorities == [Record.delete("host.example.com", RecordType.A)]
 

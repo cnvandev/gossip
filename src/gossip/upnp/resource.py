@@ -63,7 +63,7 @@ class UPnPDevice(ResourceCollection):
             URLBase=url_base,
         )
 
-    async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[StreamReader | None, Mapping[str, str]]:
+    async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[StreamReader, Mapping[str, str]]:
         xml = self.get_spec(url_base=exact_uri).to_xml().encode("utf-8")
         return BufferedReader.for_bytes(xml), {
             "Content-Type": "application/xml",

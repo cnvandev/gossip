@@ -1,6 +1,7 @@
 import logging
 from collections.abc import Iterable, Mapping
 from http import HTTPStatus
+from itertools import chain
 from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
@@ -42,9 +43,11 @@ class ExtendedHTTPResponder(HTTPResponder):
 
     async def options(self, uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> Mapping[str, str]:
         """Returns key-value pairs describing how this responder communicates."""
-        accessor_methods = set(self.accessor.methods.keys())
-        extension_methods = {method for extension in self.extensions.values() for method in extension.methods}
-        allowed_methods = set(map(str.upper, accessor_methods | extension_methods))
+        # A dict used as an ordered set: fromkeys() dedupes while keeping
+        # first-seen order, unlike a plain set (whose iteration order is
+        # randomized per run) - so `Allow` is stable across calls.
+        extension_methods = (method for extension in self.extensions.values() for method in extension.methods)
+        allowed_methods = dict.fromkeys(map(str.upper, chain(self.accessor.methods.keys(), extension_methods)))
         return {"Allow": ", ".join(allowed_methods)}
 
     async def successful(self, target: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]]], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
@@ -73,17 +76,17 @@ class ExtendedHTTPResponder(HTTPResponder):
 
                         # If we don't know an extension indicated as mandatory,
                         # we throw a `510 Not Extended`.
-                        if strength == Strength.MANDATORY and definition not in self.extensions:
-                            log.debug(f"Unknown mandatory extension `{definition}`")
-                            return (HTTPResponse(HTTPStatus.NOT_EXTENDED, self.default_headers()),)
-                        else:
+                        if strength == Strength.MANDATORY:
                             has_mandatory = True
+                            if definition not in self.extensions:
+                                log.debug(f"Unknown mandatory extension `{definition}`")
+                                return (HTTPResponse(HTTPStatus.NOT_EXTENDED, self.default_headers()),)
 
         # Mandatory requests have an `M-` prefix, strip it to get the actual
         # method.
         if has_mandatory:
             request = HTTPRequest(
-                request.method.lstrip("M-"),
+                request.method.removeprefix("M-"),
                 request.target,
                 request.headers,
                 request.body,

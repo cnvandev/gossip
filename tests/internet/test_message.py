@@ -20,86 +20,71 @@ class TestInternetMessageSerialization:
     meant to fit in a single UDP datagram with no body)."""
 
     def test_start_line_is_space_joined_with_a_trailing_crlf(self):
-        """The start line's parts are joined with spaces and end the line
-        with CRLF."""
+        """The start line's parts are joined with spaces, then CRLF."""
         message = InternetMessage(("GET", "/foo", "HTTP/1.1"), {})
         assert bytes(message) == b"GET /foo HTTP/1.1\r\n\r\n"
 
     def test_empty_start_line_is_omitted(self):
-        """A falsy start line (e.g. `()`) contributes nothing - the message
-        begins directly with headers."""
+        """A falsy start line (e.g. `()`) contributes nothing."""
         message = InternetMessage((), {"Host": "example.com"})
         assert bytes(message) == b"Host: example.com\r\n\r\n"
 
     def test_headers_are_colon_separated_and_crlf_joined(self):
-        """Each header renders as `Key: value`, and a blank line marks the
-        end of the header block."""
+        """Each header renders as `Key: value`, ending in a blank line."""
         message = InternetMessage((), {"Host": "example.com", "Accept": "*/*"})
         assert bytes(message) == b"Host: example.com\r\nAccept: */*\r\n\r\n"
 
 
 class TestInternetMessageBytesRejectsBodyOrTrailers:
     """`bytes()` only supports headers-only messages - a non-empty body or
-    any trailers can't be fully represented that way, so it raises rather
-    than silently producing an incomplete or misleading serialization."""
+    any trailers can't be fully represented that way, so it raises."""
 
     def test_raises_for_a_body(self):
-        """A message with a (non-empty) body can't be serialized via
-        `bytes()`."""
+        """A non-empty body can't be serialized via `bytes()`."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hello"))
         with pytest.raises(ValueError):
             _ = bytes(message)
 
     def test_raises_for_trailers(self):
-        """A message with trailers can't be serialized via `bytes()`
-        either, since trailers have nowhere to go in this form."""
+        """Trailers can't be serialized via `bytes()` either."""
         message = InternetMessage((), {}, trailers={"X-Checksum": "abc"})
         with pytest.raises(ValueError):
             _ = bytes(message)
 
     def test_raises_for_both(self):
-        """A message with both still raises, not just for one or the
-        other."""
+        """A message with both still raises."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers={"X-Checksum": "abc"})
         with pytest.raises(ValueError):
             _ = bytes(message)
 
     def test_does_not_raise_for_headers_only(self):
-        """A plain headers-only message is exactly what `bytes()` is for -
-        `trailers` being `None` (not given) is just as fine as it being
-        empty."""
+        """A plain headers-only message serializes fine."""
         _ = bytes(InternetMessage((), {"Host": "example.com"}))
 
 
 class TestInternetMessageTrailers:
     """`InternetMessage.trailers` - `None` until known, populated in
-    place; `wait_trailers()` is the async way to get the same value,
-    computing it (by draining whatever's left of `body` and parsing it)
+    place; `wait_trailers()` computes it (by draining and parsing `body`)
     at most once."""
 
     def test_defaults_to_none_and_needs_no_running_event_loop(self):
-        """Plain construction with no `trailers` given doesn't require an
-        event loop at all - `trailers` is just `None`, not something
-        bound to a background task."""
+        """Defaults to `None`, without needing a running event loop."""
         message = InternetMessage((), {})
         assert message.trailers is None
 
     def test_defaults_to_none_even_with_a_body(self):
-        """A `body` alone doesn't change anything about `trailers` -
-        `InternetMessage` has no idea what framing (if any) applies to
-        `body`, so it can't infer whether trailers are even possible.
-        `trailers` stays `None` until `wait_trailers()` is actually
-        called."""
+        """A `body` alone doesn't populate `trailers`."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"))
         assert message.trailers is None
 
     def test_a_plain_mapping_is_stored_immediately(self):
+        """An explicit `trailers` mapping is stored right away."""
         message = InternetMessage((), {}, trailers={"X-Checksum": "abc"})
-        assert dict(message.trailers) == {"X-Checksum": "abc"}
+        assert message.trailers is not None
+        assert message.trailers.to_dict() == {"X-Checksum": "abc"}
 
     def test_wait_trailers_returns_none_when_there_is_no_body(self):
-        """With no `body` at all, there's nothing to drain - `None`,
-        same as `trailers` was already."""
+        """With no `body` at all, returns `None`."""
 
         async def check() -> multidict | None:
             message = InternetMessage((), {})
@@ -108,10 +93,7 @@ class TestInternetMessageTrailers:
         assert run_async(check()) is None
 
     def test_wait_trailers_drains_body_and_parses_it_as_trailers(self):
-        """`wait_trailers()` doesn't know or care whether `body` has
-        already had its "real" content read off it by someone else -
-        it just drains whatever's left and parses that, whole, as a
-        trailer section."""
+        """Drains `body` and parses it as a trailer section."""
 
         async def check() -> dict[str, str] | None:
             body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
@@ -122,6 +104,8 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {"X-Checksum": "abc"}
 
     def test_wait_trailers_parses_multiple_field_lines(self):
+        """Multiple field-lines all parse into the result."""
+
         async def check() -> dict[str, str] | None:
             body = BufferedReader.for_bytes(b"A: 1\r\nB: 2\r\n\r\n")
             message = InternetMessage((), {}, body=body)
@@ -131,8 +115,7 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {"A": "1", "B": "2"}
 
     def test_wait_trailers_returns_empty_for_just_the_closing_crlf(self):
-        """Just a closing CRLF, with no field-lines before it, is a
-        valid (empty) trailer section."""
+        """A bare closing CRLF is a valid, empty trailer section."""
 
         async def check() -> dict[str, str] | None:
             body = BufferedReader.for_bytes(b"\r\n")
@@ -143,9 +126,7 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {}
 
     def test_wait_trailers_raises_for_a_field_line_without_a_colon(self):
-        """A genuinely malformed trailer field-line (no `:` to split on)
-        raises, the same way a malformed header line would fail
-        `read_from()` - via the same shared `parse_field_lines()`."""
+        """A malformed field-line (no `:`) raises."""
 
         async def check() -> None:
             body = BufferedReader.for_bytes(b"NotAFieldLine\r\n\r\n")
@@ -156,6 +137,8 @@ class TestInternetMessageTrailers:
             run_async(check())
 
     def test_wait_trailers_populates_trailers_in_place(self):
+        """After awaiting, `trailers` itself holds the parsed result."""
+
         async def check() -> dict[str, str] | None:
             body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
             message = InternetMessage((), {}, body=body)
@@ -165,9 +148,8 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {"X-Checksum": "abc"}
 
     def test_wait_trailers_reads_body_at_most_once(self):
-        """Calling `wait_trailers()` again after it's already resolved
-        doesn't re-read `body` - the memoized `trailers` value is just
-        returned directly."""
+        """A second call returns the same memoized value, without
+        re-reading `body`."""
 
         async def check() -> dict[str, str] | None:
             body = BufferedReader.for_bytes(b"X-Checksum: abc\r\n\r\n")
@@ -180,6 +162,8 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {"X-Checksum": "abc"}
 
     def test_wait_trailers_returns_a_plain_mapping_without_reading_anything(self):
+        """Given trailers upfront, returns them without reading `body`."""
+
         async def check() -> dict[str, str] | None:
             message = InternetMessage((), {}, trailers={"X-Checksum": "abc"})
             trailers = await message.wait_trailers()
@@ -188,10 +172,8 @@ class TestInternetMessageTrailers:
         assert run_async(check()) == {"X-Checksum": "abc"}
 
     def test_wait_trailers_waits_for_body_to_actually_have_data(self):
-        """A `body` that hasn't delivered its trailer bytes yet (and
-        isn't at EOF either) means `wait_trailers()` genuinely suspends -
-        it doesn't just read whatever's instantaneously available and
-        call it done."""
+        """Genuinely suspends until `body` actually has data, rather than
+        returning early."""
 
         async def check() -> dict[str, str] | None:
             body = StreamReader()
@@ -214,34 +196,29 @@ class TestInternetMessageWriteTo:
     `bytes()` - also sends any trailers."""
 
     def test_matches_bytes_for_a_headers_only_message(self):
-        """For a headers-only message - the one case `bytes()` supports -
-        `write_to()` writes exactly the same bytes."""
+        """For a headers-only message, writes the same bytes `bytes()` would."""
         message = InternetMessage(("GET", "/foo", "HTTP/1.1"), {"Host": "example.com"})
         writer = FakeStreamWriter()
         run_async(message.write_to(writer))
         assert bytes(writer.buffer) == bytes(message)
 
     def test_trailers_are_written_after_the_body(self):
-        """Trailers are appended right after the body, rendered the same
-        way headers are, ending in a blank line."""
+        """Trailers are appended right after the body."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers={"X-Checksum": "abc"})
         writer = FakeStreamWriter()
         run_async(message.write_to(writer))
         assert bytes(writer.buffer) == b"\r\nhiX-Checksum: abc\r\n\r\n"
 
     def test_no_trailers_written_when_there_are_none(self):
-        """With an empty trailers mapping, nothing is written beyond the
-        body."""
+        """With an empty trailers mapping, nothing is written beyond the body."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"), trailers={})
         writer = FakeStreamWriter()
         run_async(message.write_to(writer))
         assert bytes(writer.buffer) == b"\r\nhi"
 
     def test_no_trailers_given_resolves_to_nothing_extra_once_body_is_drained(self):
-        """Trailers not given at all means `write_to()` falls through to
-        `wait_trailers()`, which - after the body's just been streamed
-        out, fully draining it - finds nothing left to parse. Nothing
-        extra gets written, same as an explicitly empty mapping."""
+        """With no trailers given, nothing extra is written once the body
+        is drained."""
         message = InternetMessage((), {}, body=BufferedReader.for_bytes(b"hi"))
         writer = FakeStreamWriter()
         run_async(message.write_to(writer))
@@ -252,8 +229,7 @@ class TestInternetMessageRepr:
     """`repr()` formatting - just the start line, space-joined."""
 
     def test_repr_is_the_space_joined_start_line(self):
-        """The repr is the start line's parts joined with spaces, no
-        headers or body."""
+        """The repr is just the start line, no headers or body."""
         message = InternetMessage(("GET", "/foo", "HTTP/1.1"), {"Host": "example.com"}, body=BufferedReader.for_bytes(b"hi"))
         assert repr(message) == "GET /foo HTTP/1.1"
 
@@ -263,7 +239,7 @@ class TestInternetMessageReadFromTuple:
     whole message already sitting in memory, as opposed to a live stream."""
 
     def test_round_trips_a_headers_only_message(self):
-        """A header-only message round-trips to no body at all."""
+        """A headers-only message round-trips to no body at all."""
         original = InternetMessage(("GET", "/foo", "HTTP/1.1"), {"Host": "example.com"})
         parsed = run_async(InternetMessage.read_from((bytes(original), ENDPOINT)))
         assert parsed is not None
@@ -272,24 +248,18 @@ class TestInternetMessageReadFromTuple:
         assert parsed.body is None
 
     def test_ignores_bytes_following_the_header_delimiter(self):
-        """Whatever bytes happen to follow the header's blank-line
-        delimiter in the buffer, they're never turned into a body - a
-        message parsed from an in-memory buffer (a UDP datagram) is
-        headers-only, by design (see `read_from()`)."""
+        """Bytes following the header delimiter never become a body."""
         data = b"GET /foo HTTP/1.1\r\nHost: example.com\r\n\r\nleftover-bytes"
         parsed = run_async(InternetMessage.read_from((data, ENDPOINT)))
         assert parsed is not None
         assert parsed.body is None
 
     def test_returns_none_for_an_empty_buffer(self):
-        """An empty buffer has no start line to parse, so it fails
-        cleanly with `None`."""
+        """An empty buffer fails cleanly with `None`."""
         assert run_async(InternetMessage.read_from((b"", ENDPOINT))) is None
 
     def test_returns_none_for_a_header_line_without_a_colon(self):
-        """A genuinely malformed header line (no `:` to split on) is caught
-        and reported as `None`, rather than propagating the underlying
-        `ValueError`."""
+        """A malformed header line (no `:`) returns `None`."""
         data = b"GET /foo HTTP/1.1\r\nNotAHeaderLine\r\n\r\n"
         assert run_async(InternetMessage.read_from((data, ENDPOINT))) is None
 
@@ -300,18 +270,14 @@ class TestInternetMessageReadFromStream:
     caller to pull off the same reader afterward."""
 
     def test_body_is_the_reader_itself(self):
-        """`body` is the same `StreamReader` passed in, positioned right
-        after the headers - regardless of whether Content-Length is
-        present, or of what (if anything) actually follows."""
+        """`body` is the same `StreamReader`, positioned after the headers."""
         reader = BufferedReader.for_bytes(b"GET /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello")
         message = run_async(InternetMessage.read_from(reader))
         assert message is not None
         assert message.body is reader
 
     def test_caller_can_read_the_body_off_the_returned_reader(self):
-        """Since `body` is the live reader, the caller can pull exactly
-        the bytes they expect straight off it, using `Content-Length` from
-        the parsed headers."""
+        """The caller can pull the body straight off the returned reader."""
 
         async def read_it() -> bytes:
             reader = BufferedReader.for_bytes(b"GET /foo HTTP/1.1\r\nHost: example.com\r\nContent-Length: 5\r\n\r\nhello")
@@ -323,9 +289,7 @@ class TestInternetMessageReadFromStream:
         assert run_async(read_it()) == b"hello"
 
     def test_body_is_the_reader_even_with_nothing_declared_to_follow(self):
-        """A message with no `Content-Length` still gets the reader as its
-        `body` - `read_from()` makes no judgment about whether there's
-        anything left to read; that's for the caller to decide."""
+        """Still gets the reader as `body`, even with no `Content-Length`."""
         reader = BufferedReader.for_bytes(b"GET /foo HTTP/1.1\r\nHost: example.com\r\n\r\n")
         parsed = run_async(InternetMessage.read_from(reader))
         assert parsed is not None

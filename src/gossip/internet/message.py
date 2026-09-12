@@ -1,7 +1,6 @@
 import logging
 from asyncio.streams import StreamReader, StreamWriter
 from collections.abc import Iterable, Mapping
-from functools import cache
 from typing import Self, override
 
 from gossip.network.endpoint import Endpoint
@@ -75,7 +74,6 @@ class InternetMessage(Serializable):
         self.body = body
         self.trailers = multidict(trailers) if trailers is not None else None
 
-    @cache
     def __repr__(self) -> str:
         return " ".join(map(str, tuple(self.start_line)))
 

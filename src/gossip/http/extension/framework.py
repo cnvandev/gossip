@@ -28,7 +28,7 @@ class Extension(HTTPAccessor):
     def __init__(
         self,
         identifier: URI | str,
-        methods: Mapping[str, Callable[[ResourceCollection, URI, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str], Endpoint, Endpoint], Awaitable[Iterable[HTTPResponse]]]] | None = None,
+        methods: Mapping[str, Callable[[ResourceCollection, HTTPRequest, Mapping[str, tuple[Any, Mapping[str, str]] | None], Mapping[str, str], Endpoint, Endpoint], Awaitable[Iterable[HTTPResponse]]]] | None = None,
         scope: Scope = Scope.END_TO_END,
     ):
         super().__init__(methods)
@@ -69,8 +69,9 @@ class Extension(HTTPAccessor):
         if namespace is None:
             return {}
 
-        # Just return the headers that apply.
-        return {key[2:]: value for key, value in request.headers.items() if key.startswith(namespace)}
+        # Just return the headers that apply, without the "<namespace>-" prefix.
+        prefix = f"{namespace}-"
+        return {key[len(prefix):]: value for key, value in request.headers.items() if key.startswith(prefix)}
 
     async def access(self, resource: ResourceCollection, request: HTTPRequest, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], headers: Mapping[str, str], remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
         # Successful extension usage puts in this header, to indicate an

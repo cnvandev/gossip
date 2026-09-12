@@ -16,6 +16,8 @@ class TestChunkEncodedReader:
     away, leaving just the concatenated chunk-data."""
 
     def test_single_chunk_is_decoded(self):
+        """A single chunk decodes to its data."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -24,6 +26,8 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b"hello"
 
     def test_multiple_chunks_are_concatenated(self):
+        """Multiple chunks decode to their concatenated data."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -32,6 +36,8 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_empty_body_is_just_the_terminating_chunk(self):
+        """Just the terminating chunk decodes to an empty body."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -40,6 +46,8 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b""
 
     def test_chunk_extensions_are_ignored(self):
+        """Chunk extensions (after `;`) are ignored."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5;foo=bar\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -48,6 +56,8 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b"hello"
 
     def test_reports_eof_once_terminating_chunk_is_seen(self):
+        """Reports EOF once the terminating chunk is seen."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -57,6 +67,8 @@ class TestChunkEncodedReader:
         assert run_async(check()) is True
 
     def test_zero_length_read_returns_nothing(self):
+        """A zero-length read returns nothing."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -65,6 +77,8 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b""
 
     def test_reading_again_once_exhausted_returns_nothing(self):
+        """Reading again once exhausted returns nothing."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -74,9 +88,7 @@ class TestChunkEncodedReader:
         assert run_async(read_it()) == b""
 
     def test_trailer_section_is_left_unread_on_source(self):
-        """Once the terminating chunk is seen, whatever follows on
-        `source` - a trailer section here - is left completely alone,
-        for a caller to read separately."""
+        """Whatever follows the terminating chunk is left unread on `source`."""
 
         async def read_trailer() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\nX-Checksum: abc123\r\n\r\n")
@@ -87,8 +99,7 @@ class TestChunkEncodedReader:
         assert run_async(read_trailer()) == b"X-Checksum: abc123\r\n\r\n"
 
     def test_bounded_read_pulls_only_what_it_needs(self):
-        """A bounded `read(n)` only decodes as many chunks as needed to
-        satisfy `n` - it doesn't eagerly drain the whole body."""
+        """A bounded `read(n)` only decodes as many chunks as `n` needs."""
 
         async def read_it() -> tuple[bytes, bytes]:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n6\r\n world\r\n0\r\n\r\n")
@@ -102,9 +113,7 @@ class TestChunkEncodedReader:
         assert rest == b" world"
 
     def test_bounded_read_leaves_overflow_for_the_next_call(self):
-        """A `read(n)` smaller than what the current chunk decodes to
-        only hands back `n` bytes - the rest is held in `overflow` for
-        the next call, rather than being returned early or dropped."""
+        """Extra decoded bytes beyond `n` are held for the next call."""
 
         async def read_it() -> tuple[bytes, bytes]:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
@@ -118,8 +127,7 @@ class TestChunkEncodedReader:
         assert rest == b"llo"
 
     def test_bounded_read_returns_short_if_the_coding_ends_first(self):
-        """A `read(n)` asking for more than the coding actually has left
-        returns whatever's available instead of waiting or raising."""
+        """A `read(n)` asking for more than's left returns what's available."""
 
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
@@ -130,10 +138,12 @@ class TestChunkEncodedReader:
 
 
 class TestEncodedReaderReadline:
-    """`readline()` scans decoded content (via `ChunkEncodedReader`
+    """`EncodedReader.readline()` scans decoded content (via `ChunkEncodedReader`
     here) for a newline, pulling more via `decode()` as needed."""
 
     def test_reads_a_line_within_one_chunk(self):
+        """A line within one chunk reads up to and including the newline."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"b\r\nhello\nworld\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -142,6 +152,8 @@ class TestEncodedReaderReadline:
         assert run_async(read_it()) == b"hello\n"
 
     def test_leftover_after_the_newline_is_returned_by_the_next_call(self):
+        """Content after the newline is returned by the next call."""
+
         async def read_it() -> tuple[bytes, bytes]:
             source = BufferedReader.for_bytes(b"b\r\nhello\nworld\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -154,6 +166,8 @@ class TestEncodedReaderReadline:
         assert rest == b"world"
 
     def test_pulls_across_multiple_chunks_to_find_the_newline(self):
+        """Pulls across multiple chunks to find the newline."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n6\r\n\nworld\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -162,6 +176,8 @@ class TestEncodedReaderReadline:
         assert run_async(read_it()) == b"hello\n"
 
     def test_returns_everything_if_no_newline_before_exhaustion(self):
+        """With no newline before exhaustion, returns everything decoded."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -171,10 +187,12 @@ class TestEncodedReaderReadline:
 
 
 class TestEncodedReaderReaduntil:
-    """`readuntil()` scans decoded content for `separator`, raising
+    """`EncodedReader.readuntil()` scans decoded content for `separator`, raising
     `IncompleteReadError` if the coding ends before it's found."""
 
     def test_reads_up_to_the_separator(self):
+        """Reads up to and including the separator."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"b\r\nhello;world\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -183,6 +201,8 @@ class TestEncodedReaderReaduntil:
         assert run_async(read_it()) == b"hello;"
 
     def test_raises_if_separator_never_turns_up(self):
+        """Raises `IncompleteReadError` if the separator never turns up."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -193,6 +213,8 @@ class TestEncodedReaderReaduntil:
         assert exc_info.value.partial == b"hello"
 
     def test_shortest_match_wins_with_multiple_separators(self):
+        """With multiple separators, the shortest match wins."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"b\r\nhello;world\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -202,10 +224,12 @@ class TestEncodedReaderReaduntil:
 
 
 class TestEncodedReaderReadexactly:
-    """`readexactly(n)` reads exactly `n` decoded bytes, raising
+    """`EncodedReader.readexactly(n)` reads exactly `n` decoded bytes, raising
     `IncompleteReadError` if the coding ends first."""
 
     def test_reads_exactly_n_bytes(self):
+        """Reads exactly `n` decoded bytes."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"b\r\nhello world\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -214,6 +238,8 @@ class TestEncodedReaderReadexactly:
         assert run_async(read_it()) == b"hello"
 
     def test_leftover_is_returned_by_the_next_call(self):
+        """Leftover decoded bytes are returned by the next call."""
+
         async def read_it() -> tuple[bytes, bytes]:
             source = BufferedReader.for_bytes(b"b\r\nhello world\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -226,6 +252,8 @@ class TestEncodedReaderReadexactly:
         assert rest == b" world"
 
     def test_zero_length_read_returns_nothing(self):
+        """A zero-length read returns nothing."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -234,6 +262,8 @@ class TestEncodedReaderReadexactly:
         assert run_async(read_it()) == b""
 
     def test_raises_if_the_coding_ends_before_n_bytes(self):
+        """Raises `IncompleteReadError` if the coding ends before `n` bytes."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"5\r\nhello\r\n0\r\n\r\n")
             reader = ChunkEncodedReader(source)
@@ -249,6 +279,8 @@ class TestGzipEncodedReader:
     """Decoding `Content-Encoding: gzip` off a `source` reader."""
 
     def test_decodes_a_gzip_stream(self):
+        """A gzip stream decodes to its original content."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(gzip.compress(b"hello world"))
             reader = GzipEncodedReader(source)
@@ -257,8 +289,7 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_decodes_a_stream_fed_in_pieces(self):
-        """`source` doesn't have to hand back the whole compressed
-        stream in one `read()` - decoding still works chunk by chunk."""
+        """Decoding works even when `source` hands back small pieces."""
 
         async def read_it() -> bytes:
             compressed = gzip.compress(b"hello world" * 1000)
@@ -272,6 +303,8 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b"hello world" * 1000
 
     def test_reports_eof_once_decoded(self):
+        """Reports EOF once fully decoded."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(gzip.compress(b"hi"))
             reader = GzipEncodedReader(source)
@@ -281,6 +314,8 @@ class TestGzipEncodedReader:
         assert run_async(check()) is True
 
     def test_empty_input_decodes_to_empty(self):
+        """An empty gzip stream decodes to empty."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(gzip.compress(b""))
             reader = GzipEncodedReader(source)
@@ -289,6 +324,8 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b""
 
     def test_chunk_size_defaults_to_body_chunk_size(self):
+        """`chunk_size` defaults to `BODY_CHUNK_SIZE`."""
+
         async def build() -> int:
             source = BufferedReader.for_bytes(b"")
             reader = GzipEncodedReader(source)
@@ -297,9 +334,7 @@ class TestGzipEncodedReader:
         assert run_async(build()) == GzipEncodedReader.BODY_CHUNK_SIZE
 
     def test_custom_chunk_size_still_decodes_correctly(self):
-        """A small `chunk_size` forces `decode()` to pull `source` in
-        several small reads instead of one large one, but the result is
-        the same."""
+        """A small `chunk_size` still decodes to the same result."""
 
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(gzip.compress(b"hello world"))
@@ -310,9 +345,7 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_truncated_stream_is_exhausted_without_the_decompressor_seeing_its_own_end(self):
-        """If `source` runs dry before the compressed stream's own
-        end-of-data marker is seen (a truncated body), decoding just
-        stops - it isn't treated as an error here."""
+        """A truncated stream just stops decoding, rather than raising."""
 
         async def read_it() -> bytes:
             truncated = gzip.compress(b"hello world")[:5]
@@ -323,10 +356,7 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b""
 
     def test_concatenated_members_decode_as_one_continuous_stream(self):
-        """A `gzip` stream can be several concatenated members (RFC 1952
-        permits this, e.g. `cat a.gz b.gz > combined.gz`) - decoding
-        continues across the boundary instead of stopping at the first
-        member's own end-of-data marker, matching `gzip.decompress()`."""
+        """Concatenated gzip members decode as one continuous stream."""
 
         async def read_it() -> bytes:
             combined = gzip.compress(b"hello ") + gzip.compress(b"world")
@@ -337,8 +367,7 @@ class TestGzipEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_many_concatenated_members_in_a_single_source_read(self):
-        """Multiple member boundaries within one `source.read()` chunk
-        are all walked, not just the first."""
+        """Multiple member boundaries within one chunk are all walked."""
 
         async def read_it() -> bytes:
             combined = gzip.compress(b"a") + gzip.compress(b"b") + gzip.compress(b"c")
@@ -355,6 +384,8 @@ class TestDeflateEncodedReader:
     senders actually use."""
 
     def test_decodes_a_zlib_wrapped_stream(self):
+        """A zlib-wrapped stream decodes to its original content."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(zlib.compress(b"hello world"))
             reader = DeflateEncodedReader(source)
@@ -363,6 +394,8 @@ class TestDeflateEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_decodes_a_raw_deflate_stream(self):
+        """A raw (unwrapped) DEFLATE stream decodes to its original content."""
+
         async def read_it() -> bytes:
             compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
             raw = compressor.compress(b"hello world") + compressor.flush()
@@ -373,6 +406,8 @@ class TestDeflateEncodedReader:
         assert run_async(read_it()) == b"hello world"
 
     def test_reports_eof_once_decoded(self):
+        """Reports EOF once fully decoded."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(zlib.compress(b"hi"))
             reader = DeflateEncodedReader(source)
@@ -382,6 +417,8 @@ class TestDeflateEncodedReader:
         assert run_async(check()) is True
 
     def test_truncated_stream_is_exhausted_without_the_decompressor_seeing_its_own_end(self):
+        """A truncated stream just stops decoding, rather than raising."""
+
         async def read_it() -> bytes:
             truncated = zlib.compress(b"hello world")[:2]
             source = BufferedReader.for_bytes(truncated)
@@ -397,6 +434,8 @@ class TestLimitedReader:
     bound."""
 
     def test_reads_up_to_the_limit(self):
+        """Reads up to `limit` bytes."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 5)
@@ -405,9 +444,7 @@ class TestLimitedReader:
         assert run_async(read_it()) == b"hello"
 
     def test_does_not_read_past_the_limit(self):
-        """The rest of `source`, beyond `limit`, is left completely
-        unread - as if it belonged to whatever comes next on the
-        connection."""
+        """Bytes beyond `limit` are left unread on `source`."""
 
         async def read_rest() -> bytes:
             source = BufferedReader.for_bytes(b"hello world")
@@ -418,6 +455,8 @@ class TestLimitedReader:
         assert run_async(read_rest()) == b" world"
 
     def test_reports_eof_once_the_limit_is_reached(self):
+        """Reports EOF once `limit` is reached."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 5)
@@ -427,6 +466,8 @@ class TestLimitedReader:
         assert run_async(check()) is True
 
     def test_zero_limit_reads_nothing_and_is_immediately_eof(self):
+        """A zero limit reads nothing and is immediately EOF."""
+
         async def check() -> tuple[bytes, bool]:
             source = BufferedReader.for_bytes(b"hello")
             reader = LimitedReader(source, 0)
@@ -438,6 +479,8 @@ class TestLimitedReader:
         assert eof is True
 
     def test_bounded_read_pulls_only_what_it_needs(self):
+        """A bounded `read(n)` only pulls what `n` needs."""
+
         async def read_it() -> tuple[bytes, bytes]:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 11)
@@ -450,10 +493,8 @@ class TestLimitedReader:
         assert rest == b" world"
 
     def test_source_ending_early_raises_eof_error(self):
-        """A single `read()` call only ever makes a single `source.read()`
-        call, so a short `source` hands back its partial data first (like
-        any stream's normal partial-read behavior) - the shortfall only
-        becomes an error once a later call finds nothing left at all."""
+        """A `source` that ends before `limit` raises only once a later
+        call finds nothing left at all."""
 
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hi")
@@ -467,10 +508,12 @@ class TestLimitedReader:
 
 
 class TestLimitedReaderReadline:
-    """`readline()` delegates to `source.readline()`, truncating the
+    """`LimitedReader.readline()` delegates to `source.readline()`, truncating the
     result down to `limit` if it overshoots."""
 
     def test_reads_a_line_within_the_limit(self):
+        """A line within the limit reads up to and including the newline."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello\nworld\n")
             reader = LimitedReader(source, 100)
@@ -479,6 +522,8 @@ class TestLimitedReaderReadline:
         assert run_async(read_it()) == b"hello\n"
 
     def test_truncates_a_line_that_overshoots_the_limit(self):
+        """A line that overshoots the limit is truncated to it."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello world\n")
             reader = LimitedReader(source, 5)
@@ -487,6 +532,8 @@ class TestLimitedReaderReadline:
         assert run_async(read_it()) == b"hello"
 
     def test_reports_eof_once_the_limit_is_reached_by_truncation(self):
+        """Reports EOF once the limit is reached by truncation."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(b"hello world\n")
             reader = LimitedReader(source, 5)
@@ -496,6 +543,8 @@ class TestLimitedReaderReadline:
         assert run_async(check()) is True
 
     def test_returns_nothing_once_the_limit_is_already_reached(self):
+        """Returns nothing once the limit is already reached."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello\n")
             reader = LimitedReader(source, 0)
@@ -505,10 +554,12 @@ class TestLimitedReaderReadline:
 
 
 class TestLimitedReaderReaduntil:
-    """`readuntil()` delegates to `source.readuntil()`, raising
+    """`LimitedReader.readuntil()` delegates to `source.readuntil()`, raising
     `IncompleteReadError` if the separator only turns up beyond `limit`."""
 
     def test_reads_up_to_the_separator_within_the_limit(self):
+        """Reads up to the separator when it's within the limit."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello;world;")
             reader = LimitedReader(source, 100)
@@ -517,6 +568,8 @@ class TestLimitedReaderReaduntil:
         assert run_async(read_it()) == b"hello;"
 
     def test_raises_if_the_separator_is_beyond_the_limit(self):
+        """Raises `IncompleteReadError` if the separator is beyond the limit."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello world;")
             reader = LimitedReader(source, 5)
@@ -527,6 +580,8 @@ class TestLimitedReaderReaduntil:
         assert exc_info.value.partial == b"hello"
 
     def test_raises_immediately_once_the_limit_is_already_reached(self):
+        """Raises immediately once the limit is already reached."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello;")
             reader = LimitedReader(source, 0)
@@ -538,11 +593,13 @@ class TestLimitedReaderReaduntil:
 
 
 class TestLimitedReaderReadexactly:
-    """`readexactly(n)` caps its request to `source` the same way
+    """`LimitedReader.readexactly(n)` caps its request to `source` the same way
     `read(n)` does, raising `IncompleteReadError` if `n` itself exceeds
     what's left of `limit`."""
 
     def test_reads_exactly_n_within_the_limit(self):
+        """Reads exactly `n` bytes when within the limit."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 100)
@@ -551,6 +608,8 @@ class TestLimitedReaderReadexactly:
         assert run_async(read_it()) == b"hello"
 
     def test_raises_if_n_exceeds_the_limit(self):
+        """Raises `IncompleteReadError` if `n` exceeds the limit."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 5)
@@ -562,6 +621,8 @@ class TestLimitedReaderReadexactly:
         assert exc_info.value.expected == 10
 
     def test_reports_eof_once_the_limit_is_reached(self):
+        """Reports EOF once the limit is reached."""
+
         async def check() -> bool:
             source = BufferedReader.for_bytes(b"hello world")
             reader = LimitedReader(source, 5)
@@ -571,6 +632,8 @@ class TestLimitedReaderReadexactly:
         assert run_async(check()) is True
 
     def test_zero_length_read_succeeds_even_once_limit_is_reached(self):
+        """A zero-length read succeeds even once the limit is reached."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello")
             reader = LimitedReader(source, 0)
@@ -579,6 +642,8 @@ class TestLimitedReaderReadexactly:
         assert run_async(read_it()) == b""
 
     def test_raises_without_touching_source_once_limit_is_already_reached(self):
+        """Raises without touching `source` once the limit is already reached."""
+
         async def read_it() -> bytes:
             source = BufferedReader.for_bytes(b"hello")
             reader = LimitedReader(source, 0)

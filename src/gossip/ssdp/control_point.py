@@ -93,4 +93,4 @@ class SSDPControlPoint:
             }
             remote_host = Endpoint(remote_host.address, tcp_port)
 
-        return await self.client.unicast_search(headers, remote_host)
+        return await self.client.unicast_search(remote_host.address, headers)

@@ -57,5 +57,16 @@ class CaseInsensitiveMultiDict(UserDict[str, str]):
         """
         return (str(key) for key in self.data)
 
+    def to_dict(self) -> dict[str, str]:
+        """Returns a plain, ordinary `dict` copy.
+
+        Just `dict(self)`, typed to return `dict[str, str]` outright -
+        useful anywhere the caller has (or might have) an
+        `CaseInsensitiveMultiDict | None` and a type checker won't resolve
+        `dict()`'s overloads against that on its own. Case-insensitivity is
+        lost in the copy, same as any `dict(some_multidict)` conversion.
+        """
+        return dict(self)
+
 
 multidict = CaseInsensitiveMultiDict

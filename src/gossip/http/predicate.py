@@ -1,7 +1,7 @@
 import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
 from langcodes import Language
 
@@ -30,7 +30,7 @@ class RequestPredicate[T](ABC):
     @abstractmethod
     def compare(self, option: T, acceptable: T) -> bool: ...
 
-    def accepts(self, accept_string: str) -> tuple[tuple[T, dict[str, str]], ...]:
+    def accepts(self, accept_string: str) -> tuple[tuple[T, Mapping[str, str]], ...]:
         """Return a tuple of all acceptable options in our list (with args).
 
         Quality-ranked header matching algorithm: split on commas, parse, and
@@ -42,7 +42,7 @@ class RequestPredicate[T](ABC):
         acceptable = ((self.parse(value), params) for value, params in parse_field_values(accept_string))
 
         # We'll group the acceptable types by quality according to the accept headers.
-        grouped: defaultdict[float, list[tuple[T, dict[str, str]]]] = defaultdict(list)
+        grouped: defaultdict[float, list[tuple[T, Mapping[str, str]]]] = defaultdict(list)
         for accept_type, args in acceptable:
             # "If no 'q' parameter is present, the default weight is 1."
             # (RFC 9110 §12.4.2)

@@ -13,7 +13,6 @@ from gossip.internet.mime import MediaType
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
-from gossip.network.serializer import Serializable
 
 # See: https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Date
 TIME_FORMAT = "%a, %d %b %Y %H:%M:%S GMT"
@@ -77,7 +76,7 @@ class HTTPResponder(ResourceCollection):
             "Date": request_time.strftime(TIME_FORMAT),
         }
 
-    async def respond(self, request: HTTPRequest, remote_endpoint: Endpoint, local_endpoint: Endpoint) -> Iterable[Serializable]:
+    async def respond(self, request: HTTPRequest, remote_endpoint: Endpoint, local_endpoint: Endpoint) -> Iterable[HTTPResponse]:
         """Identifies the targeted resource and gets the responder to handle it.
 
         Manages error-handling and walks through the resource-identifying step,
@@ -113,14 +112,16 @@ class HTTPResponder(ResourceCollection):
                 # request constraints.
                 constraints = target.is_representable(request.headers)
 
-                # A non-Falsey value for the predicate header means it can be represented.
+                # A header the predicate rejected outright still comes back as
+                # an (option, args) pair, just with `None` as the option - so
+                # satisfiability is "every header's accepted option is truthy".
                 if constraints and not all(value for value, _ in constraints.values()):
                     # ResourceCollection found, but constraints not satisfiable.
                     log.debug("Unsatisfable request for %s (%s)", target, identifier)
                     responses = self.unsatisfiable(constraints)
-
-                # We can now execute the function referenced by the method.
-                return await self.successful(target, request, constraints, remote_endpoint, local_endpoint)
+                else:
+                    # We can now execute the function referenced by the method.
+                    return await self.successful(target, request, constraints, remote_endpoint, local_endpoint)
 
         # This might be a one-time iterable, so we'll generate a tuple of
         # responses so we can iterate over it multiple times.
@@ -151,8 +152,10 @@ class HTTPResponder(ResourceCollection):
     def unsatisfiable(self, constraints: Mapping[str, tuple[Any, Mapping[str, str]]]) -> Iterable[HTTPResponse]:
         """Returns a response if a resource was found, but the request could not be satisfied."""
         # For a convenient error message, we'll dump the keys to the
-        # constraints that weren't met.
-        failures = {header for (header, _), value in constraints.items() if not value}
+        # constraints that weren't met. Each value is an (option, args) pair
+        # even on rejection (option is `None`), so it's the option itself -
+        # not the pair, which is always truthy - that says whether it failed.
+        failures = {header for header, (value, _) in constraints.items() if not value}
         if "Accept" in failures:
             status = HTTPStatus.UNSUPPORTED_MEDIA_TYPE
         elif "Authorization" in failures:

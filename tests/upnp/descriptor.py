@@ -6,7 +6,7 @@ Not a test module - imported by test_descriptor.py.
 from uuid import UUID
 
 from gossip.internet.uri import URI
-from gossip.ssdp.uri import SSDPDeviceTarget, SSDPTarget
+from gossip.ssdp.uri import SSDP_DOMAIN, SSDPDeviceTarget, SSDPTarget
 from gossip.upnp.model.descriptor import Device, Service
 
 DEFAULT_UDN = UUID("11111111-1111-1111-1111-111111111111")
@@ -35,9 +35,11 @@ class DummyDevice(Device):
         udn: UUID = DEFAULT_UDN,
         deviceList: tuple[Device, ...] | None = None,
         serviceList: tuple[Service, ...] | None = None,
+        domain: str = SSDP_DOMAIN,
+        version: int | None = None,
     ):
         super().__init__(
-            deviceType=SSDPDeviceTarget.device_type(name),
+            deviceType=SSDPDeviceTarget.device_type(name, version=version, domain=domain),
             friendlyName=name,
             manufacturer="Acme",
             modelName="Widget",

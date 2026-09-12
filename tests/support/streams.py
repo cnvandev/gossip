@@ -21,12 +21,13 @@ class FakeStreamWriter(StreamWriter):
 
     def __init__(self):
         self.buffer = bytearray()
+        self.drained = False
 
     def write(self, data: bytes | bytearray | memoryview) -> None:
         self.buffer.extend(data)
 
     async def drain(self) -> None:
-        pass
+        self.drained = True
 
     def __del__(self, warnings=None) -> None:
         # The real StreamWriter.__del__ checks self._transport, which we

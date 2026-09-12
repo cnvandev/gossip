@@ -21,7 +21,7 @@ class TestRawReads:
     to read past the end of it."""
 
     def test_read_bytes_advances_offset(self):
-        """`read_bytes()` returns the requested slice and moves the cursor
+        """`DNSDataReader.read_bytes()` returns the requested slice and moves the cursor
         past it."""
         reader = DNSDataReader(b"\x01\x02\x03\x04")
         assert reader.read_bytes(2) == b"\x01\x02"
@@ -35,7 +35,7 @@ class TestRawReads:
             reader.read_bytes(5)
 
     def test_read_struct_unpacks_and_advances(self):
-        """`read_struct()` unpacks a struct format and moves the cursor by
+        """`DNSDataReader.read_struct()` unpacks a struct format and moves the cursor by
         its size."""
         reader = DNSDataReader(struct.pack("!HH", 42, 1))
         assert reader.read_struct("!HH") == (42, 1)

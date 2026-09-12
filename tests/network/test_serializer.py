@@ -1,22 +1,11 @@
 from asyncio import StreamReader, get_running_loop, sleep
 from asyncio import run as run_async
+from typing import Self
 
+from gossip.network.endpoint import Endpoint
 from gossip.network.serializer import BufferedReader, Serializable
 
-
-class FakeStreamWriter:
-    """A minimal stand-in for `StreamWriter`, recording what was written
-    and whether the write was drained."""
-
-    def __init__(self):
-        self.written = b""
-        self.drained = False
-
-    def write(self, data: bytes) -> None:
-        self.written += data
-
-    async def drain(self) -> None:
-        self.drained = True
+from ..support.streams import FakeStreamWriter
 
 
 class Message(Serializable):
@@ -29,15 +18,17 @@ class Message(Serializable):
     def __bytes__(self) -> bytes:
         return self.data
 
+    @classmethod
+    async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint]) -> Self | None:
+        raise NotImplementedError("not exercised by these tests")
+
 
 class TestSerializableWriteTo:
-    """`Serializable.write_to()`'s default implementation - the "dumb"
-    fallback used by anything that doesn't override it, which just writes
+    """`Serializable.write_to()`'s default implementation - writes
     `bytes(self)` and drains."""
 
     def test_writes_bytes_and_drains(self):
-        """The full `bytes()` form is written to the writer in one call,
-        and the write is drained before returning."""
+        """The full `bytes()` form is written and the write is drained."""
 
         async def write_it() -> FakeStreamWriter:
             writer = FakeStreamWriter()
@@ -45,7 +36,7 @@ class TestSerializableWriteTo:
             return writer
 
         writer = run_async(write_it())
-        assert writer.written == b"hello"
+        assert bytes(writer.buffer) == b"hello"
         assert writer.drained is True
 
 
@@ -55,14 +46,7 @@ class TestBufferedReader:
     be built (and fed) outside a running loop."""
 
     def test_works_with_no_running_event_loop(self):
-        """Constructing one, and feeding it, doesn't require a running
-        event loop - it has to work from a plain, synchronous constructor
-        call (building a message before any `await`), not just from inside
-        a coroutine.
-
-        This is a regression test: the real `StreamReader.__init__()`
-        eagerly grabs `asyncio.get_event_loop()`, which raises outside a
-        running loop - that's exactly why `BufferedReader` skips it."""
+        """Constructing and feeding one doesn't require a running event loop."""
         reader = BufferedReader()
         reader.feed_data(b"hi")
         reader.feed_eof()
@@ -80,9 +64,7 @@ class TestBufferedReader:
         assert run_async(read_it()) == b"hello"
 
     def test_wait_closed_blocks_until_feed_eof(self):
-        """`wait_closed()` genuinely suspends until `feed_eof()` is
-        called - it isn't already resolved just because the reader
-        exists."""
+        """`wait_closed()` suspends until `feed_eof()` is called."""
 
         async def check() -> bool:
             reader = BufferedReader()
@@ -103,16 +85,12 @@ class TestBufferedReaderForBytes:
     would otherwise repeat."""
 
     def test_works_with_no_running_event_loop(self):
-        """Building one this way doesn't require a running event loop
-        either, same as the raw constructor - it's just automating the
-        `feed_data()`/`feed_eof()` calls, not introducing anything that
-        would need one."""
+        """Doesn't require a running event loop, same as the raw constructor."""
         reader = BufferedReader.for_bytes(b"hi")
         assert isinstance(reader, StreamReader)
 
     def test_yields_exactly_the_given_bytes(self):
-        """Reading it back returns exactly the bytes it was built from,
-        then EOF."""
+        """Reading it back returns exactly the bytes it was built from."""
 
         async def read_it() -> bytes:
             reader = BufferedReader.for_bytes(b"hello")
@@ -121,7 +99,6 @@ class TestBufferedReaderForBytes:
         assert run_async(read_it()) == b"hello"
 
     def test_wait_closed_returns_immediately(self):
-        """`feed_eof()` already happened by construction, so `wait_closed()`
-        never actually suspends."""
+        """Already fed and EOF'd by construction, so this never suspends."""
         reader = BufferedReader.for_bytes(b"hello")
         assert run_async(reader.wait_closed()) is None
