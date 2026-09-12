@@ -36,7 +36,11 @@ class Radio:
 
     async def tcp_listen(self, callback: Callable[[StreamReader, StreamWriter], Awaitable[None]], port: int | None = None) -> Server:
         """Listen for TCP connections on every address we can."""
-        return await asyncio.start_server(callback, port=port)
+        addresses = tuple(str(address) for address in self.addresses())
+        if port is None:
+            return await asyncio.start_server(callback, addresses)
+        else:
+            return await asyncio.start_server(callback, addresses, port=port)
 
     async def tcp_send(self, remote: Endpoint) -> tuple[StreamReader, StreamWriter]:
         """Send a TCP message to the specified address/port."""

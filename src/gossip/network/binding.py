@@ -56,7 +56,7 @@ class Binding:
 
         return await loop.create_datagram_endpoint(
             lambda: DatagramReplyProtocol(loop=loop),
-            local_addr=str(self.address),
+            local_addr=(str(self.address), 0),
             remote_addr=(str(address[0]), address[1]),
             proto=IPPROTO_UDP,
         )
@@ -123,9 +123,12 @@ class Binding:
             if arg in address_dict:
                 kwargs[arg] = ipaddress.ip_address(address_dict.get(arg, ""))
 
-        # netmask is an IP network address
-        if "netmask" in address_dict:
-            netmask_str = address_dict.get("netmask", "")
-            kwargs["netmask"] = ipaddress.ip_network(netmask_str)
+        # netmask is a dotted-decimal mask (e.g. "255.255.255.0") for IPv4, or
+        # already-prefixed (e.g. "ffff:ffff::/64") for IPv6 - neither is a
+        # network address on its own, so combine it with `addr` to get the
+        # right prefix length.
+        if "netmask" in address_dict and "addr" in address_dict:
+            netmask_str = address_dict.get("netmask", "").rpartition("/")[2]
+            kwargs["netmask"] = ipaddress.ip_network(f"{address_dict['addr']}/{netmask_str}", strict=False)
 
         return cls(**kwargs)

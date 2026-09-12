@@ -38,9 +38,7 @@ class TestEndpointStringForm:
         assert str(endpoint) == "192.168.1.1:1900"
 
     def test_str_with_ipv6_is_bracketed(self):
-        """An IPv6 endpoint renders with the address in brackets,
-        `[address]:port` - without them, the address's own colons would be
-        indistinguishable from the one separating it from the port."""
+        """An IPv6 endpoint renders with the address in brackets, `[address]:port`."""
         endpoint = Endpoint(IPv6Address("::1"), 1900)
         assert str(endpoint) == "[::1]:1900"
 
