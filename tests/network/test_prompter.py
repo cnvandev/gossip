@@ -14,7 +14,7 @@ from gossip.network.interface import Interface
 from gossip.network.prompter import Prompter, queue_iterator
 from gossip.network.radio import Radio
 
-from ..support.asyncio import wait_closing
+from ..support.asyncio import StaticReplyProtocol, wait_closing
 
 LOOPBACK = IPv4Address("127.0.0.1")
 MULTICAST_GROUP = IPv4Address("239.255.255.250")
@@ -101,14 +101,8 @@ class TestPrompterPromptUdp:
         transport the prompt was sent from."""
         loop = asyncio.get_running_loop()
 
-        class Responder(asyncio.DatagramProtocol):
-            def connection_made(self, transport):
-                self.transport = transport
-
-            def datagram_received(self, data, addr):
-                self.transport.sendto(bytes(HTTPResponse(HTTPStatus.OK)), addr)
-
-        responder_transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=(str(LOOPBACK), 0))
+        fixed_reply = bytes(HTTPResponse(HTTPStatus.OK))
+        responder_transport, _ = await loop.create_datagram_endpoint(lambda: StaticReplyProtocol(fixed_reply), local_addr=(str(LOOPBACK), 0))
         with contextlib.closing(responder_transport):
             _, responder_port = responder_transport.get_extra_info("sockname")
 
@@ -123,14 +117,7 @@ class TestPrompterPromptUdp:
         rather than raising."""
         loop = asyncio.get_running_loop()
 
-        class Responder(asyncio.DatagramProtocol):
-            def connection_made(self, transport):
-                self.transport = transport
-
-            def datagram_received(self, data, addr):
-                self.transport.sendto(b"not a valid HTTP message\r\n\r\n", addr)
-
-        responder_transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=(str(LOOPBACK), 0))
+        responder_transport, _ = await loop.create_datagram_endpoint(lambda: StaticReplyProtocol(b"not a valid HTTP message\r\n\r\n"), local_addr=(str(LOOPBACK), 0))
         with contextlib.closing(responder_transport):
             _, responder_port = responder_transport.get_extra_info("sockname")
 
@@ -208,14 +195,7 @@ class TestPrompterBroadcast:
             )
         )
 
-        class Responder(asyncio.DatagramProtocol):
-            def connection_made(self, transport):
-                self.transport = transport
-
-            def datagram_received(self, data, addr):
-                self.transport.sendto(b"pong", addr)
-
-        listener_transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=(str(LOOPBACK), 0))
+        listener_transport, _ = await loop.create_datagram_endpoint(lambda: StaticReplyProtocol(b"pong"), local_addr=(str(LOOPBACK), 0))
         with contextlib.closing(listener_transport):
             _, host_port = listener_transport.get_extra_info("sockname")
 
@@ -282,14 +262,7 @@ class TestPrompterBroadcastPrompt:
         loop = asyncio.get_running_loop()
         radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=None),)}),))
 
-        class Responder(asyncio.DatagramProtocol):
-            def connection_made(self, transport):
-                self.transport = transport
-
-            def datagram_received(self, data, addr):
-                self.transport.sendto(bytes(HTTPResponse(HTTPStatus.OK)), addr)
-
-        responder_transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=(str(LOOPBACK), 0))
+        responder_transport, _ = await loop.create_datagram_endpoint(lambda: StaticReplyProtocol(bytes(HTTPResponse(HTTPStatus.OK))), local_addr=(str(LOOPBACK), 0))
         with contextlib.closing(responder_transport):
             _, responder_port = responder_transport.get_extra_info("sockname")
 
