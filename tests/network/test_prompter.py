@@ -21,24 +21,17 @@ MULTICAST_GROUP = IPv4Address("239.255.255.250")
 ROOT = URI.parse("/")
 
 
-def _loopback_radio() -> Radio:
-    """A `Radio` bound to loopback - enough for `tcp_listen()`/
-    `udp_broadcast()`, which (unlike `tcp_send()`/`udp_send()`) need a
-    real configured interface to bind to."""
-    return Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=LOOPBACK),)}),))
-
-
 class TestPrompterInit:
     """Building a `Prompter`."""
 
     def test_stores_the_deserializer(self):
         """`deserializer` is stored as given."""
-        prompter = Prompter(HTTPResponse.read_from, radio=_loopback_radio())
+        prompter = Prompter(HTTPResponse.read_from, radio=Radio.loopback())
         assert prompter.deserializer == HTTPResponse.read_from
 
     def test_stores_the_given_radio(self):
         """A given `radio` is stored as-is."""
-        radio = _loopback_radio()
+        radio = Radio.loopback()
         prompter = Prompter(HTTPResponse.read_from, radio=radio)
         assert prompter.radio is radio
 
@@ -63,7 +56,7 @@ class TestPrompterPromptTcp:
             writer.close()
             await writer.wait_closed()
 
-        radio = _loopback_radio()
+        radio = Radio.loopback()
         server = await radio.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
@@ -88,7 +81,7 @@ class TestPrompterPromptTcp:
             writer.close()
             await writer.wait_closed()
 
-        radio = _loopback_radio()
+        radio = Radio.loopback()
         server = await radio.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
@@ -119,7 +112,7 @@ class TestPrompterPromptUdp:
         with contextlib.closing(responder_transport):
             _, responder_port = responder_transport.get_extra_info("sockname")
 
-            prompter = Prompter(HTTPResponse.read_from, radio=_loopback_radio())
+            prompter = Prompter(HTTPResponse.read_from, radio=Radio.loopback())
             reply = await prompter.prompt_udp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, responder_port))
 
             assert reply is not None
@@ -141,7 +134,7 @@ class TestPrompterPromptUdp:
         with contextlib.closing(responder_transport):
             _, responder_port = responder_transport.get_extra_info("sockname")
 
-            prompter = Prompter(HTTPResponse.read_from, radio=_loopback_radio())
+            prompter = Prompter(HTTPResponse.read_from, radio=Radio.loopback())
             reply = await prompter.prompt_udp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, responder_port))
 
             assert reply is None
@@ -155,7 +148,7 @@ class TestPrompterPromptUdp:
         with contextlib.closing(silent_transport):
             _, silent_port = silent_transport.get_extra_info("sockname")
 
-            prompter = Prompter(HTTPResponse.read_from, radio=_loopback_radio())
+            prompter = Prompter(HTTPResponse.read_from, radio=Radio.loopback())
             with pytest.raises(TimeoutError):
                 await prompter.prompt_udp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, silent_port))
 
@@ -163,7 +156,7 @@ class TestPrompterPromptUdp:
         """With a `tcp_port`, the reply is read from a TCP connection to
         that port instead of the UDP socket."""
         loop = asyncio.get_running_loop()
-        radio = _loopback_radio()
+        radio = Radio.loopback()
 
         class Responder(asyncio.DatagramProtocol):
             def connection_made(self, transport):

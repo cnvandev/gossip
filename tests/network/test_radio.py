@@ -139,6 +139,33 @@ class TestRadioUdpBroadcast:
                 transport.close()
 
 
+class TestRadioLoopback:
+    """`Radio.loopback()` builds a `Radio` bound only to loopback, with
+    no real network interfaces required."""
+
+    def test_binds_only_to_loopback(self):
+        """The only address it's bound to is loopback."""
+        assert set(Radio.loopback().addresses()) == {LOOPBACK}
+
+    async def test_is_usable_for_a_real_tcp_round_trip(self):
+        """It's a real, working `Radio` - not just a placeholder."""
+        radio = Radio.loopback()
+        received = asyncio.get_running_loop().create_future()
+
+        async def on_connection(reader, writer):
+            received.set_result(await reader.read())
+            writer.close()
+
+        server = await radio.tcp_listen(on_connection)
+        async with wait_closing(server):
+            _, port = server.sockets[0].getsockname()
+            _, writer = await radio.tcp_send(Endpoint(LOOPBACK, port))
+            async with wait_closing(writer):
+                writer.write(b"hello")
+                writer.write_eof()
+                assert await asyncio.wait_for(received, timeout=2) == b"hello"
+
+
 class TestRadioFromNetifaces:
     """Building a `Radio` from `netifaces`, restricted to a set of
     interface name prefixes and address families - checked against the

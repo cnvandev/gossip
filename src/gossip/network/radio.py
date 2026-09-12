@@ -13,6 +13,7 @@ from netifaces import AF_INET  # , AF_INET6
 
 from gossip.asyncio.protocol.callback import DatagramCallbackProtocol
 from gossip.asyncio.protocol.reply import DatagramReplyProtocol
+from gossip.network.binding import Binding
 from gossip.network.endpoint import Endpoint
 from gossip.network.interface import Interface
 
@@ -75,6 +76,12 @@ class Radio:
     def addresses(self) -> Generator[IPv4Address | IPv6Address]:
         """All IP addresses bound to this radio."""
         return (address for interface in self.interfaces.values() for address in interface.addresses())
+
+    @classmethod
+    def loopback(cls) -> Self:
+        """A `Radio` bound only to loopback (127.0.0.1) - useful for local
+        testing, without needing any real network interfaces."""
+        return cls((Interface("lo0", {AF_INET: (Binding(IPv4Address("127.0.0.1")),)}),))
 
     @classmethod
     def from_netifaces(cls, interfaces: tuple[str, ...] = INTERFACES, address_families: tuple[int, ...] = ADDRESS_FAMILIES) -> Self:
