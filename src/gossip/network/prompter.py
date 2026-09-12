@@ -125,19 +125,22 @@ class Prompter[Reply: Serializable]:
         connections = []
         for transport, protocol in await self.radio.udp_broadcast(host.address, host.port):
             connections.append(protocol.reply)
+            # Closing a transport immediately deregisters it from the event
+            # loop, so it can never actually receive a reply - close it only
+            # once its reply is in (or it's given up waiting for one).
+            protocol.reply.add_done_callback(lambda _, transport=transport: transport.close())
+
             # Open the connection to send the request.
             local_address = Endpoint.for_addr(transport.get_extra_info("sockname"))
 
             # Generate the prompt message, either the fixed message or
             # generated using the local address.
-            if isinstance(prompt, Callable):
-                prompt = prompt(local_address)
+            sent_prompt = prompt(local_address) if isinstance(prompt, Callable) else prompt
 
             # Finally, send the actual message via the protocol.
-            serialized = bytes(prompt)
-            log.info("Broadcast %r (%d bytes) on %s.", prompt, len(serialized), host)
+            serialized = bytes(sent_prompt)
+            log.info("Broadcast %r (%d bytes) on %s.", sent_prompt, len(serialized), host)
             transport.sendto(serialized)
-            transport.close()
 
         return asyncio.gather(*connections)
 
@@ -194,14 +197,13 @@ class Prompter[Reply: Serializable]:
                 _ = await interface.udp_listen(udp_callback, port=udp_port)
 
             # Generate the prompt message using the local address if we need.
-            if isinstance(prompt, Callable):
-                prompt = prompt(local_address)
+            sent_prompt = prompt(local_address) if isinstance(prompt, Callable) else prompt
 
             # Finally, send the actual message via the protocol.
-            serialized = bytes(prompt)
+            serialized = bytes(sent_prompt)
             broadcast_transport.sendto(serialized)
             broadcast_transport.close()
-            log.info("Broadcast prompt %r (%d bytes) to %s.", prompt, len(serialized), host)
+            log.info("Broadcast prompt %r (%d bytes) to %s.", sent_prompt, len(serialized), host)
 
         return stream.iterate(queue_iterator(queue))
 
