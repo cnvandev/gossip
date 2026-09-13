@@ -2,7 +2,7 @@
 
 Not a test module - imported by tests that need to close something
 that requires an awaited `wait_closed()`, not just a `close()` call, or
-a real UDP socket that replies with a fixed message.
+a real UDP socket that replies with a fixed (or sequenced) message.
 """
 
 import asyncio
@@ -23,6 +23,23 @@ class StaticReplyProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         self.transport.sendto(self.reply, addr)
+
+
+class SequencedReplyProtocol(asyncio.DatagramProtocol):
+    """Replies with each of `replies` in turn, one per datagram received -
+    the last reply repeats for any further datagrams."""
+
+    def __init__(self, replies: list[bytes]):
+        self.replies = replies
+        self.count = 0
+
+    def connection_made(self, transport: asyncio.DatagramTransport) -> None:
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
+        reply = self.replies[min(self.count, len(self.replies) - 1)]
+        self.count += 1
+        self.transport.sendto(reply, addr)
 
 
 class _WaitsToClose(Protocol):

@@ -1,10 +1,14 @@
-"""Shared network test doubles.
+"""Shared network test doubles and helpers.
 
 Not a test module - imported by tests that need a real socket to
-receive from.
+receive from, or a free port to bind something else to.
 """
 
 import asyncio
+
+from gossip.network.radio import Radio
+
+from .asyncio import wait_closing
 
 
 class SingleDatagramProtocol(asyncio.DatagramProtocol):
@@ -19,3 +23,18 @@ class SingleDatagramProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         self.received.set_result((data, addr))
+
+
+async def free_tcp_port(radio: Radio) -> int:
+    """Finds a free TCP port on `radio`'s own addresses, by briefly
+    binding to an ephemeral one and closing it right away.
+
+    Not perfectly race-free (something else could grab the port before
+    the real listener rebinds it), but good enough for tests."""
+
+    async def close_immediately(_, writer):
+        writer.close()
+
+    async with wait_closing(await radio.tcp_listen(close_immediately)) as probe:
+        _, port = probe.sockets[0].getsockname()
+    return port

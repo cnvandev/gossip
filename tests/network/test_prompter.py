@@ -13,8 +13,11 @@ from gossip.network.endpoint import Endpoint
 from gossip.network.interface import Interface
 from gossip.network.prompter import Prompter, queue_iterator
 from gossip.network.radio import Radio
+from gossip.network.replier import Replier
 
 from ..support.asyncio import StaticReplyProtocol, wait_closing
+from ..support.http import echo_request
+from ..support.network import free_tcp_port
 
 LOOPBACK = IPv4Address("127.0.0.1")
 MULTICAST_GROUP = IPv4Address("239.255.255.250")
@@ -47,29 +50,18 @@ class TestPrompterPromptTcp:
     and returns the deserialized reply."""
 
     async def test_returns_the_deserialized_reply(self):
-        """The reply written back is read and deserialized."""
-        received = asyncio.get_running_loop().create_future()
-
-        async def on_connection(reader, writer):
-            received.set_result(await HTTPRequest.read_from(reader))
-            await HTTPResponse(HTTPStatus.OK, {"X-Test": "yes"}).write_to(writer)
-            writer.close()
-            await writer.wait_closed()
-
+        """The reply written back is read and deserialized, carrying
+        back what the server actually received."""
         radio = Radio.loopback()
-        server = await radio.tcp_listen(on_connection)
-        async with wait_closing(server):
-            _, port = server.sockets[0].getsockname()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
             reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
 
             assert reply is not None
             assert reply.status == HTTPStatus.OK
-            assert reply.headers["X-Test"] == "yes"
-
-            sent = await asyncio.wait_for(received, timeout=2)
-            assert sent is not None
-            assert sent.method == "GET"
+            assert reply.headers["Test-Request-Method"] == "GET"
 
     async def test_returns_none_for_an_unparseable_reply(self):
         """A reply the deserializer can't parse comes back as `None`."""
