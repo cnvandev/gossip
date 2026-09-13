@@ -78,8 +78,12 @@ class Interface:
         # kind of have to? I don't know, I'm using the first available one but I
         # should look into this more - there's probably a reason it doesn't take
         # a list. Maybe I just have to create a bunch of them here...?
-        addresses = tuple(str(binding.address) for bindings in self.bindings.values() for binding in bindings)
+        bindings = tuple(binding for bindings in self.bindings.values() for binding in bindings)
+        addresses = tuple(str(binding.address) for binding in bindings)
         address_string = str(group_address) if group_address is not None else None
+
+        if group_address is not None and not await bindings[0].can_multicast_to(group_address):
+            raise ValueError(f"No multicast route from {bindings[0].address} to {group_address}")
 
         if factory is None:
             def interface_factory():
@@ -87,7 +91,10 @@ class Interface:
                     callback,
                     loop=loop,
                     group_address=address_string,
-                    interface_address=addresses[0],
+                    # Only filter by interface when joining a multicast
+                    # group - a plain unicast port listen has nothing to
+                    # filter, and should report no interface address.
+                    interface_address=addresses[0] if group_address is not None else None,
                 )
 
             factory = interface_factory

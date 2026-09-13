@@ -48,7 +48,14 @@ class Radio:
         return await asyncio.open_connection(str(remote.address), remote.port)
 
     async def udp_listen(self, callback: Callable[[bytes, IPv4Address | IPv6Address | None, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int = 0, group_address: IPv4Address | IPv6Address | None = None) -> list[tuple[DatagramTransport, DatagramCallbackProtocol]]:
-        """Listen for UDP messages on all interfaces."""
+        """Listen for UDP messages on every interface that can support it.
+
+        An interface that can't route to `group_address` (loopback,
+        typically) is logged and skipped, rather than aborting every
+        other interface's listen along with it - unless none of them
+        can, in which case there's nothing to fall back on, and it
+        raises after all.
+        """
         listeners = (
             interface.udp_listen(
                 callback,
@@ -57,7 +64,22 @@ class Radio:
             )
             for interface in self.interfaces.values()
         )
-        return await asyncio.gather(*listeners)
+        results = await asyncio.gather(*listeners, return_exceptions=True)
+
+        successes = []
+        failures = []
+        for interface, result in zip(self.interfaces.values(), results):
+            if isinstance(result, ValueError):
+                log.warning("Skipping UDP listen on interface `%s`: %s", interface.name, result)
+                failures.append(result)
+            elif isinstance(result, BaseException):
+                raise result
+            else:
+                successes.append(result)
+
+        if not successes and failures:
+            raise failures[0]
+        return successes
 
     async def udp_broadcast(self, group_address: IPv4Address | IPv6Address, port: int = 0) -> list[tuple[DatagramTransport, DatagramReplyProtocol]]:
         """Broadcast on all available interfaces."""

@@ -3,14 +3,17 @@ from contextlib import closing
 from ipaddress import IPv4Address, IPv4Network
 
 import netifaces
+import pytest
 from netifaces import AF_INET
 
 from gossip.network.binding import Binding
 from gossip.network.endpoint import Endpoint
 from gossip.network.interface import Interface
+from gossip.network.radio import Radio
+from gossip.network.replier import Replier
 
 from ..support.asyncio import wait_closing
-from ..support.network import SingleDatagramProtocol
+from ..support.network import RawMessage, await_reply, echo_datagram, real_interface_address
 
 LOOPBACK = IPv4Address("127.0.0.1")
 
@@ -73,17 +76,17 @@ class TestInterfaceUdpSend:
     endpoint."""
 
     async def test_sends_to_the_remote_endpoint(self):
-        """The datagram arrives at the remote endpoint."""
+        """The datagram arrives at the remote endpoint - a `Replier` on
+        the other end proves it by echoing it straight back."""
         interface = Interface("lo0", {AF_INET: (Binding(LOOPBACK),)})
-        loop = asyncio.get_running_loop()
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
 
-        listener_transport, listener = await loop.create_datagram_endpoint(SingleDatagramProtocol, local_addr=(str(LOOPBACK), 0))
-        with closing(listener_transport):
-            _, listener_port = listener_transport.get_extra_info("sockname")
-            send_transport, _ = await interface.udp_send(Endpoint(LOOPBACK, listener_port))
+        async with Replier(callback=echo_datagram, udp={0: RawMessage.read_from}, radio=radio) as replier:
+            _, port = replier.udp_transports[0].get_extra_info("sockname")
+            send_transport, sender = await interface.udp_send(Endpoint(LOOPBACK, port))
             with closing(send_transport):
                 send_transport.sendto(b"ping")
-                data, _ = await asyncio.wait_for(listener.received, timeout=2)
+                data, _ = await await_reply(sender)
                 assert data == b"ping"
 
 
@@ -113,10 +116,50 @@ class TestInterfaceUdpListen:
                 assert data == b"ping"
                 assert sender == Endpoint(LOOPBACK, sender_port)
 
-    async def test_a_group_address_listens_on_the_group_rather_than_a_bindings_own_address(self):
-        """With a `group_address`, the socket binds to the group address
-        and port, not one of the interface's own bindings."""
+    async def test_reports_no_interface_address_for_a_plain_unicast_listen(self):
+        """A plain unicast listen (no `group_address`) reports no
+        interface address - there's nothing to filter by, since it's
+        not joining a multicast group on a specific interface."""
         interface = Interface("lo0", {AF_INET: (Binding(LOOPBACK),)})
+        loop = asyncio.get_running_loop()
+        received = loop.create_future()
+
+        async def on_datagram(_data, interface_address, _sender, _transport):
+            received.set_result(interface_address)
+
+        listen_transport, _ = await interface.udp_listen(on_datagram, port=0)
+        with closing(listen_transport):
+            _, listen_port = listen_transport.get_extra_info("sockname")
+
+            send_transport, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol, local_addr=(str(LOOPBACK), 0))
+            with closing(send_transport):
+                send_transport.sendto(b"ping", (str(LOOPBACK), listen_port))
+                interface_address = await asyncio.wait_for(received, timeout=2)
+                assert interface_address is None
+
+    async def test_a_group_address_that_cant_be_routed_raises(self):
+        """A `group_address` that can't actually be reached (loopback,
+        typically - it isn't in the system's multicast routes unless
+        one's been added for it) raises, rather than silently binding
+        to a group nothing will ever be delivered to."""
+        interface = Interface("lo0", {AF_INET: (Binding(LOOPBACK),)})
+        group = IPv4Address("239.255.255.250")
+
+        async def on_datagram(_data, _interface_address, _sender, _transport):
+            pass
+
+        with pytest.raises(ValueError):
+            await interface.udp_listen(on_datagram, port=1900, group_address=group)
+
+    async def test_a_group_address_listens_on_the_group_when_it_can_be_routed(self):
+        """With a real, routable `group_address`, the socket binds to
+        the group address and port, not one of the interface's own
+        bindings."""
+        address = real_interface_address()
+        if address is None:
+            pytest.skip("no real (non-loopback) network interface available")
+
+        interface = Interface("real", {AF_INET: (Binding(address),)})
         group = IPv4Address("239.255.255.250")
 
         async def on_datagram(_data, _interface_address, _sender, _transport):
@@ -137,18 +180,17 @@ class TestInterfaceUdpBroadcast:
         broad = Binding(LOOPBACK, netmask=IPv4Network("127.0.0.0/8"), broadcast=None)
         specific = Binding(LOOPBACK, netmask=IPv4Network("127.0.0.1/32"), broadcast=LOOPBACK)
         interface = Interface("lo0", {AF_INET: (broad, specific)})
-
-        loop = asyncio.get_running_loop()
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
 
         # `specific` is the only one of the two that's broadcasting, so
-        # if it's chosen, the group address itself becomes reachable.
-        listener_transport, listener = await loop.create_datagram_endpoint(SingleDatagramProtocol, local_addr=(str(LOOPBACK), 0))
-        with closing(listener_transport):
-            _, listener_port = listener_transport.get_extra_info("sockname")
-            transport, _ = await interface.udp_broadcast(LOOPBACK, port=listener_port)
+        # if it's chosen, the group address itself becomes reachable -
+        # a `Replier` bound there echoes back what's sent.
+        async with Replier(callback=echo_datagram, udp={0: RawMessage.read_from}, radio=radio) as replier:
+            _, port = replier.udp_transports[0].get_extra_info("sockname")
+            transport, sender = await interface.udp_broadcast(LOOPBACK, port=port)
             with closing(transport):
                 transport.sendto(b"ping")
-                data, _ = await asyncio.wait_for(listener.received, timeout=2)
+                data, _ = await await_reply(sender)
                 assert data == b"ping"
 
     async def test_a_binding_with_no_netmask_sorts_before_none_of_them(self):
@@ -157,16 +199,14 @@ class TestInterfaceUdpBroadcast:
         no_netmask = Binding(LOOPBACK, netmask=None, broadcast=None)
         specific = Binding(LOOPBACK, netmask=IPv4Network("127.0.0.1/32"), broadcast=LOOPBACK)
         interface = Interface("lo0", {AF_INET: (no_netmask, specific)})
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
 
-        loop = asyncio.get_running_loop()
-
-        listener_transport, listener = await loop.create_datagram_endpoint(SingleDatagramProtocol, local_addr=(str(LOOPBACK), 0))
-        with closing(listener_transport):
-            _, listener_port = listener_transport.get_extra_info("sockname")
-            transport, _ = await interface.udp_broadcast(LOOPBACK, port=listener_port)
+        async with Replier(callback=echo_datagram, udp={0: RawMessage.read_from}, radio=radio) as replier:
+            _, port = replier.udp_transports[0].get_extra_info("sockname")
+            transport, sender = await interface.udp_broadcast(LOOPBACK, port=port)
             with closing(transport):
                 transport.sendto(b"ping")
-                data, _ = await asyncio.wait_for(listener.received, timeout=2)
+                data, _ = await await_reply(sender)
                 assert data == b"ping"
 
 

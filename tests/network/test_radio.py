@@ -3,15 +3,17 @@ from contextlib import closing
 from ipaddress import IPv4Address
 
 import netifaces
+import pytest
 from netifaces import AF_INET
 
 from gossip.network.binding import Binding
 from gossip.network.endpoint import Endpoint
 from gossip.network.interface import Interface
 from gossip.network.radio import Radio
+from gossip.network.replier import Replier
 
 from ..support.asyncio import wait_closing
-from ..support.network import SingleDatagramProtocol
+from ..support.network import RawMessage, await_reply, echo_datagram, real_interface_address
 
 LOOPBACK = IPv4Address("127.0.0.1")
 
@@ -69,17 +71,17 @@ class TestRadioUdpSend:
     endpoint."""
 
     async def test_sends_to_the_remote_endpoint(self):
-        """The datagram arrives at the remote endpoint."""
+        """The datagram arrives at the remote endpoint - a `Replier` on
+        the other end proves it by echoing it straight back."""
         radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
-        loop = asyncio.get_running_loop()
+        receiver_radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
 
-        listener_transport, listener = await loop.create_datagram_endpoint(SingleDatagramProtocol, local_addr=(str(LOOPBACK), 0))
-        with closing(listener_transport):
-            _, listener_port = listener_transport.get_extra_info("sockname")
-            send_transport, _ = await radio.udp_send(Endpoint(LOOPBACK, listener_port))
+        async with Replier(callback=echo_datagram, udp={0: RawMessage.read_from}, radio=receiver_radio) as replier:
+            _, port = replier.udp_transports[0].get_extra_info("sockname")
+            send_transport, sender = await radio.udp_send(Endpoint(LOOPBACK, port))
             with closing(send_transport):
                 send_transport.sendto(b"ping")
-                data, _ = await asyncio.wait_for(listener.received, timeout=2)
+                data, _ = await await_reply(sender)
                 assert data == b"ping"
 
 
@@ -121,6 +123,59 @@ class TestRadioUdpListen:
                 data, sender = await asyncio.wait_for(received, timeout=2)
                 assert data == b"ping"
                 assert sender == Endpoint(LOOPBACK, sender_port)
+
+    async def test_a_group_address_skips_interfaces_that_cant_route_it_but_still_listens_on_the_rest(self, caplog):
+        """An interface that can't route to `group_address` (loopback,
+        typically) is skipped with a warning, rather than aborting the
+        listen on every other interface too."""
+        address = real_interface_address()
+        if address is None:
+            pytest.skip("no real (non-loopback) network interface available")
+
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}), Interface("real", {AF_INET: (Binding(address),)})))
+        group = IPv4Address("239.255.255.250")
+
+        async def on_datagram(_data, _interface_address, _sender, _transport):
+            pass
+
+        listeners = await radio.udp_listen(on_datagram, port=1900, group_address=group)
+        try:
+            assert len(listeners) == 1
+            transport, _ = listeners[0]
+            assert transport.get_extra_info("sockname") == (str(group), 1900)
+            assert "lo0" in caplog.text
+        finally:
+            for transport, _ in listeners:
+                transport.close()
+
+    async def test_a_group_address_raises_when_no_interface_can_route_it(self):
+        """With nothing to fall back on - every interface fails the
+        same way - the failure isn't silently swallowed, it raises."""
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
+        group = IPv4Address("239.255.255.250")
+
+        async def on_datagram(_data, _interface_address, _sender, _transport):
+            pass
+
+        with pytest.raises(ValueError):
+            await radio.udp_listen(on_datagram, port=1900, group_address=group)
+
+    async def test_a_non_routing_failure_still_propagates(self):
+        """A failure that isn't the multicast-routing `ValueError` -
+        some other, genuine problem - isn't skipped like a routing gap
+        is, it propagates."""
+
+        class BrokenInterface(Interface):
+            async def udp_listen(self, callback, port, group_address=None, factory=None):
+                raise RuntimeError("boom")
+
+        radio = Radio((BrokenInterface("broken", {}),))
+
+        async def on_datagram(_data, _interface_address, _sender, _transport):
+            pass
+
+        with pytest.raises(RuntimeError):
+            await radio.udp_listen(on_datagram, port=0)
 
 
 class TestRadioUdpBroadcast:

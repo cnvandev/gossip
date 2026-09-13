@@ -1,6 +1,7 @@
 import asyncio
 import ipaddress
 import logging
+import socket
 from asyncio import Server
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
@@ -86,9 +87,64 @@ class Binding:
             allow_broadcast=True,
         )
 
+    async def can_multicast_to(self, group_address: IPv4Address | IPv6Address) -> bool:
+        """Whether a multicast datagram sent from this binding would actually be
+        delivered to a listener joined to `group_address` on this same address.
+
+        Joins `group_address` on a temporary listener bound to this
+        address, sends a real probe datagram from a socket bound the
+        same way, and waits briefly to see if it arrives.
+
+        Loopback is often missing from the system's multicast routes unless
+        one's been added for it: the OS then sends every multicast datagram out
+        some other, real interface regardless of this address, so a listener
+        that joined specifically via loopback never sees it.
+        """
+        loop = asyncio.get_running_loop()
+
+        listen_transport, listener = await loop.create_datagram_endpoint(
+            lambda: DatagramReplyProtocol(loop, str(group_address), str(self.address)),
+            local_addr=(str(group_address), 0),
+            reuse_port=True,
+        )
+        try:
+            _, listen_port = listen_transport.get_extra_info("sockname")
+
+            send_transport, _ = await loop.create_datagram_endpoint(
+                asyncio.DatagramProtocol,
+                local_addr=(str(self.address), 0),
+                remote_addr=(str(group_address), listen_port),
+                proto=IPPROTO_UDP,
+            )
+            try:
+                # Deliberately not setting `IP_MULTICAST_IF` here - a
+                # real sender never does either, so leaving it unset is
+                # what makes the probe's routing decision match theirs.
+                # Loop back is left on (the OS default) so a probe that
+                # does happen to go out this address's own interface is
+                # actually delivered locally, the same way it would be
+                # for any other local listener.
+                send_socket = send_transport.get_extra_info("socket")
+                send_socket.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_LOOP, 1)
+
+                probe_payload = b"gossip-can-multicast-to-probe"
+                send_transport.sendto(probe_payload)
+                try:
+                    reply = await asyncio.wait_for(listener.reply, timeout=0.5)
+                    return reply is not None and reply[0] == probe_payload
+                except TimeoutError:
+                    return False
+            finally:
+                send_transport.close()
+        finally:
+            listen_transport.close()
+
     async def udp_listen(self, callback: Callable[[bytes, IPv4Address | IPv6Address | None, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int, group_address: IPv4Address | IPv6Address | None = None, factory: Callable[[], DatagramCallbackProtocol] | None = None) -> tuple[DatagramTransport, DatagramCallbackProtocol]:
         """Listen for UDP messages on this binding."""
         loop = asyncio.get_running_loop()
+
+        if group_address is not None and not await self.can_multicast_to(group_address):
+            raise ValueError(f"No multicast route from {self.address} to {group_address}")
 
         if factory is None:
             address_string = str(group_address) if group_address is not None else None

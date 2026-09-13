@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from asyncio import Server
 from asyncio.streams import StreamReader, StreamWriter
 from asyncio.transports import DatagramTransport
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -26,13 +27,18 @@ class Replier[Prompt: Serializable]:
     radio: Radio
     callback: Callable[[Prompt, Endpoint, Endpoint], Awaitable[Iterable[Serializable]]]
     tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]]
-    udp: Mapping[int | Endpoint | None, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]]
+    udp: Mapping[int | Endpoint, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]]
+
+    """The TCP servers and UDP transports opened by `__aenter__()` -
+    empty until entered, closed again by `__aexit__()`."""
+    tcp_servers: tuple[Server, ...]
+    udp_transports: tuple[DatagramTransport, ...]
 
     def __init__(
         self,
         callback: Callable[[Prompt, Endpoint, Endpoint], Awaitable[Iterable[Serializable]]],
         tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]] | None = None,
-        udp: Mapping[int | Endpoint | None, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]] | None = None,
+        udp: Mapping[int | Endpoint, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]] | None = None,
         radio: Radio | None = None,
         *args,
         **kwargs,
@@ -41,6 +47,8 @@ class Replier[Prompt: Serializable]:
         self.tcp = tcp or {}
         self.udp = udp or {}
         self.radio = radio or Radio.from_netifaces()
+        self.tcp_servers = ()
+        self.udp_transports = ()
         super().__init__(*args, **kwargs)
 
     async def __aenter__(self):
@@ -51,12 +59,12 @@ class Replier[Prompt: Serializable]:
         # Set up our TCP listeners
         for port, tcp_deserializer in self.tcp.items():
 
-            async def tcp_callback(tcp_reader: StreamReader, tcp_writer: StreamWriter) -> None:
+            async def tcp_callback(tcp_reader: StreamReader, tcp_writer: StreamWriter, deserializer: Callable[[StreamReader], Awaitable[Prompt | None]] = tcp_deserializer) -> None:
                 remote_address = tcp_writer.get_extra_info("peername")
                 remote_endpoint = Endpoint.for_addr(remote_address)
                 log.debug("Received prompt from TCP %s", remote_endpoint)
 
-                prompt = await tcp_deserializer(tcp_reader)
+                prompt = await deserializer(tcp_reader)
                 log.debug("Deserialized %r from TCP %s", prompt, remote_endpoint)
                 if prompt is None:
                     return
@@ -79,12 +87,12 @@ class Replier[Prompt: Serializable]:
         # Set up our UDP listeners
         for port_or_endpoint, udp_deserializer in self.udp.items():
 
-            async def udp_callback(datagram: bytes, local_address: IPv4Address | IPv6Address | None, remote_endpoint: Endpoint, transport: DatagramTransport) -> None:
+            async def udp_callback(datagram: bytes, local_address: IPv4Address | IPv6Address | None, remote_endpoint: Endpoint, transport: DatagramTransport, deserializer: Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]] = udp_deserializer) -> None:
                 bound_address = transport.get_extra_info("sockname")
                 bound_endpoint = Endpoint.for_addr(bound_address)
                 if local_address is None:
                     log.debug("Received prompt from %s as UDP %s", remote_endpoint, bound_endpoint)
-                    prompt = await udp_deserializer((datagram, remote_endpoint))
+                    prompt = await deserializer((datagram, remote_endpoint))
                     log.debug("Deserialized %r as UDP %s", prompt, bound_endpoint)
                     if prompt is None:
                         return  # No prompt found, skip this callback
@@ -92,16 +100,13 @@ class Replier[Prompt: Serializable]:
                     replies = tuple(await self.callback(prompt, remote_endpoint, bound_endpoint))
                     for reply in replies:
                         log.debug("Writing reply %r as UDP %s", reply, bound_endpoint)
-                        message = bytes(reply)
-                        reply_transport, _ = await self.radio.udp_send(remote_endpoint)
-                        reply_transport.sendto(message)
-                        reply_transport.close()
+                        transport.sendto(bytes(reply), (str(remote_endpoint.address), remote_endpoint.port))
                     log.debug("Done, closing connection to UDP %s.", local_address)
                 else:
                     local_endpoint = Endpoint(local_address, bound_endpoint.port)
                     log.debug("Received prompt from %s as UDP %s (on channel %s)", remote_endpoint, local_address, bound_endpoint)
 
-                    prompt = await udp_deserializer((datagram, remote_endpoint))
+                    prompt = await deserializer((datagram, remote_endpoint))
                     log.debug("Deserialized %r from %s as UDP %s (on channel %s)", prompt, remote_endpoint, local_address, bound_endpoint)
                     if prompt is None:
                         return  # No prompt found, skip this callback
@@ -109,6 +114,9 @@ class Replier[Prompt: Serializable]:
                     replies = tuple(await self.callback(prompt, remote_endpoint, local_endpoint))
                     for reply in replies:
                         log.debug("Writing reply %r as UDP %s (on channel %s)", reply, local_address, bound_endpoint)
+
+                        # Unlike unicast messages, a new UDP send is required
+                        # here since multicast doesn't leave the transport open.
                         message = bytes(reply)
                         reply_transport, _ = await self.radio.udp_send(remote_endpoint)
                         reply_transport.sendto(message)
@@ -117,27 +125,30 @@ class Replier[Prompt: Serializable]:
                 log.debug("Done, closing connection to UDP %s.", local_address)
 
             # If we're given an endpoint (IP & port), we're listening on a
-            # multicast socket with that group address. If it's an integer, we
-            # listen on that port for unicast messages. Otherwise, we'll choose
-            # a random port.
+            # multicast socket with that group address. Otherwise, it's a
+            # port to listen on for unicast messages - 0 for a random one.
             if isinstance(port_or_endpoint, Endpoint):
                 listeners += (self.radio.udp_listen(udp_callback, port_or_endpoint.port, port_or_endpoint.address),)
                 port_strings += (f"UDP broadcast address {port_or_endpoint}",)
-            elif port_or_endpoint is not None:
-                listeners += (self.radio.udp_listen(udp_callback, port_or_endpoint or 0),)
-                port_strings += (f"UDP port {port_or_endpoint}",)
             else:
-                listeners += (self.radio.udp_listen(udp_callback),)
-                port_strings += ("UDP (random port)",)
+                listeners += (self.radio.udp_listen(udp_callback, port_or_endpoint),)
+                port_strings += (f"UDP port {port_or_endpoint}",)
 
         if not listeners:
             raise ValueError("At least one port or group address must be specified")
 
-        _ = await asyncio.gather(*listeners)
+        results = await asyncio.gather(*listeners)
+        self.tcp_servers = tuple(result for result in results if isinstance(result, Server))
+        self.udp_transports = tuple(transport for result in results if not isinstance(result, Server) for transport, _ in result)
         log.info("%s listening on %s", self.__class__.__name__, ", ".join(port_strings))
 
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        # Apparently we HAVE to implement this.
-        pass
+        """Stop listening, closing every socket `__aenter__()` opened."""
+        for server in self.tcp_servers:
+            server.close()
+        for transport in self.udp_transports:
+            transport.close()
+        if self.tcp_servers:
+            await asyncio.gather(*(server.wait_closed() for server in self.tcp_servers))
