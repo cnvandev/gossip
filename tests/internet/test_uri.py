@@ -106,3 +106,67 @@ class TestURIFactories:
         value = UUID(int=1)
         uri = URI.uuid(value)
         assert str(uri) == f"uuid:{value}"
+
+
+class TestURICovers:
+    """`URI.covers()` and the comparison operators built on it: the base
+    case is exact equality, so a plain `URI` covers only itself. A
+    subclass (e.g. `SSDPTarget`) can override `covers()` to recognize
+    additional patterns of its own, without needing to redefine `<=`,
+    `>=`, `<`, or `>` - they all dispatch through `covers()`."""
+
+    def test_an_equal_uri_is_covered(self):
+        """A URI covers an equal URI."""
+        assert URI.parse("http://example.com/x").covers(URI.parse("http://example.com/x"))
+
+    def test_a_different_uri_is_not_covered(self):
+        """A URI doesn't cover a different one."""
+        assert not URI.parse("http://example.com/x").covers(URI.parse("http://example.com/y"))
+
+    def test_covers_accepts_plain_tuples_not_just_uri(self):
+        """A plain `ParseResult`-shaped tuple works as the argument to
+        `covers()`, not just a `URI` instance."""
+        uri = URI.parse("http://example.com/x")
+        assert uri.covers(tuple(uri))
+
+    def test_le_and_ge_agree_with_covers_for_equal_uris(self):
+        """Equal URIs are both `<=` and `>=` each other."""
+        a = URI.parse("http://example.com/x")
+        b = URI.parse("http://example.com/x")
+        assert a <= b
+        assert a >= b
+
+    def test_le_and_ge_disagree_for_different_uris(self):
+        """Different URIs are neither `<=` nor `>=` each other, since
+        neither covers the other."""
+        a = URI.parse("http://example.com/x")
+        b = URI.parse("http://example.com/y")
+        assert not (a <= b)
+        assert not (a >= b)
+
+    def test_le_accepts_a_plain_tuple_on_the_right_side(self):
+        """A plain tuple works on the right side of `<=` too, not just a
+        `URI` instance."""
+        uri = URI.parse("http://example.com/x")
+        assert uri <= tuple(uri)
+
+    def test_ge_accepts_a_plain_tuple_on_the_right_side(self):
+        """A plain tuple works on the right side of `>=` too, not just a
+        `URI` instance."""
+        uri = URI.parse("http://example.com/x")
+        assert uri >= tuple(uri)
+
+    def test_lt_and_gt_are_false_between_equal_uris(self):
+        """Equal URIs are never strictly `<` or `>` each other."""
+        a = URI.parse("http://example.com/x")
+        b = URI.parse("http://example.com/x")
+        assert not (a < b)
+        assert not (a > b)
+
+    def test_lt_and_gt_are_false_for_unrelated_uris(self):
+        """With covers() as plain equality, neither of two different URIs
+        covers the other, so neither is strictly `<` nor `>` the other."""
+        a = URI.parse("http://example.com/x")
+        b = URI.parse("http://example.com/y")
+        assert not (a < b)
+        assert not (a > b)

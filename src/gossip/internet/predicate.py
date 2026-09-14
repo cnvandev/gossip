@@ -7,6 +7,7 @@ from langcodes import Language
 
 from gossip.http.field import parse_field_values
 from gossip.internet.mime import MediaType
+from gossip.internet.uri import URI
 
 log = logging.getLogger(__name__)
 
@@ -94,6 +95,21 @@ class LanguagePredicate(RequestPredicate[Language]):
 
     def compare(self, option: Language, acceptable: Language):
         return option.distance(acceptable) < self.MIN_DISTANCE
+
+
+class URIPredicate(RequestPredicate[URI]):
+    """A predicate for comparing URIs.
+
+    This predicate compares via `URI.covers()`/`<=`: the base case is
+    exact equality, but a `URI` subclass may recognize additional
+    patterns of its own (e.g. SSDP's `ssdp:all` wildcard target).
+    """
+
+    def parse(self, input: str) -> URI:
+        return URI.parse(input)
+
+    def compare(self, option: URI, acceptable: URI):
+        return option <= acceptable
 
 
 class StringPredicate(RequestPredicate[str]):

@@ -4,10 +4,10 @@ from collections.abc import Mapping
 from typing import Any
 
 from gossip.http.resource import ResourceCollection
-from gossip.internet.predicate import StringPredicate
 from gossip.internet.uri import URI
 from gossip.network.serializer import BufferedReader
 from gossip.ssdp.headers import BOOT_ID, CONFIG_ID
+from gossip.ssdp.predicate import SSDPTargetPredicate
 from gossip.ssdp.uri import SSDPTarget
 from gossip.upnp.model.descriptor import Device, DeviceSpec, Version
 from gossip.upnp.uri import ESCAPED_SCHEMA
@@ -22,11 +22,9 @@ class UPnPDevice(ResourceCollection):
         self.device = device
 
         # We're predicate on searches that match these targets.
-        targets = map(str, (target for _, target in device.targets().items()))
+        targets = (SSDPTarget.parse(str(target)) for _, target in device.targets().items())
         predicates = {
-            # We add ssdp:all to the list of targets so that we match requests
-            # for all devices.
-            "ST": StringPredicate(tuple(targets) + (str(SSDPTarget.all()),)),
+            "ST": SSDPTargetPredicate(targets),
         }
         data = {
             str(target): {

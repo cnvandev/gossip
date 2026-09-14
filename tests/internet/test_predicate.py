@@ -1,7 +1,8 @@
 from langcodes import Language
 
 from gossip.internet.mime import MediaType
-from gossip.internet.predicate import LanguagePredicate, MediaTypePredicate, StringPredicate
+from gossip.internet.predicate import LanguagePredicate, MediaTypePredicate, StringPredicate, URIPredicate
+from gossip.internet.uri import URI
 
 
 class TestMediaTypePredicate:
@@ -50,6 +51,22 @@ class TestMediaTypePredicate:
         predicate = MediaTypePredicate([MediaType.text("html"), MediaType.application("json")])
         accepted = predicate.accepts("*/*")
         assert {option for option, _ in accepted} == {MediaType.text("html"), MediaType.application("json")}
+
+
+class TestURIPredicate:
+    """Matching a header value against a set of offered URIs, via
+    `URI.covers()`/`<=` - the base case is exact equality."""
+
+    def test_accepts_exact_match(self):
+        """An offered URI that exactly matches the header is accepted."""
+        uri = URI.parse("http://example.com/x")
+        predicate = URIPredicate([uri])
+        assert predicate.accepts(str(uri)) == ((uri, {}),)
+
+    def test_rejects_unlisted_uri(self):
+        """A URI that isn't among the offered options is rejected."""
+        predicate = URIPredicate([URI.parse("http://example.com/x")])
+        assert predicate.accepts("http://example.com/y") == ()
 
 
 class TestStringPredicate:

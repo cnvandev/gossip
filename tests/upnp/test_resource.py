@@ -16,14 +16,23 @@ class TestUPnPDeviceConstruction:
     derives its search predicate and per-target data straight from the
     device's own `targets()`."""
 
-    def test_st_predicate_matches_every_target_and_the_ssdp_all_wildcard(self):
-        """The `ST` predicate matches every device target, plus `ssdp:all`."""
+    def test_st_predicate_options_are_every_device_target(self):
+        """The `ST` predicate's options are every device target."""
         device = DummyDevice("mydevice", udn=UDN)
         resource = UPnPDevice(device)
         options = resource.predicates["ST"].options
         for target in device.targets().values():
-            assert str(target) in options
-        assert str(SSDPTarget.all()) in options
+            assert SSDPTarget.parse(str(target)) in options
+
+    def test_st_predicate_accepts_ssdp_all_for_every_target(self):
+        """A search for `ssdp:all` matches every device target, since
+        `SSDPTarget.covers()` treats it as a wildcard rather than a
+        target of its own."""
+        device = DummyDevice("mydevice", udn=UDN)
+        resource = UPnPDevice(device)
+        predicate = resource.predicates["ST"]
+        accepted = {option for option, _ in predicate.accepts(str(SSDPTarget.all()))}
+        assert accepted == set(predicate.options)
 
     def test_data_has_an_entry_per_target_with_config_boot_and_usn(self):
         """`data` has an entry per target, with config ID, boot ID, and USN."""

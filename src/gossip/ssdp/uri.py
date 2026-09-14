@@ -37,6 +37,15 @@ class SSDPTarget(SSDPDeviceTarget):
         """All devices."""
         return cls.ssdp("all")
 
+    @override
+    def covers(self, other: tuple[str, ...]) -> bool:
+        """True if a search for `self` also matches `other`.
+
+        `ssdp:all` covers every target, since it's a search for anything;
+        any other target falls back to `URI.covers()`'s exact equality.
+        """
+        return self == self.all() or super().covers(other)
+
     @classmethod
     def service_type(cls, type: str, version: int | None = None, domain: str = SSDP_DOMAIN) -> Self:
         """Any service of a type, with version/domain."""

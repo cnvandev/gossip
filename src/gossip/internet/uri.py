@@ -11,6 +11,44 @@ class URI(ParseResult):
         """Serialize the URI to a string using `urllib.parse.urlunparse`."""
         return self.geturl()
 
+    def covers(self, other: tuple[str, ...]) -> bool:
+        """True if `self` matches every request that `other` would.
+
+        The base case is exact equality - every URI covers itself and
+        nothing else. A subclass may recognize additional patterns of its
+        own (e.g. SSDP's `ssdp:all` wildcard target), which is what makes
+        this the single relation the comparison operators below are built
+        from, rather than plain equality itself.
+        """
+        if not isinstance(other, URI):
+            other = self.__class__(*other)
+        return self == other
+
+    @override
+    def __le__(self, other: tuple[str, ...]) -> bool:
+        """True if `other` covers `self`."""
+        if not isinstance(other, URI):
+            other = self.__class__(*other)
+        return other.covers(self)
+
+    @override
+    def __ge__(self, other: tuple[str, ...]) -> bool:
+        """True if `self` covers `other`."""
+        if not isinstance(other, URI):
+            other = self.__class__(*other)
+        return self.covers(other)
+
+    @override
+    def __lt__(self, other: tuple[str, ...]) -> bool:
+        """True if `self` is strictly more specific than `other`: `other`
+        covers `self`, but `self` doesn't cover `other` back."""
+        return self <= other and not self >= other
+
+    @override
+    def __gt__(self, other: tuple[str, ...]) -> bool:
+        """True if `self` is strictly more general than `other`."""
+        return self >= other and not self <= other
+
     def join(self, path: str) -> Self:
         """Resolve `path` against this URI as a relative reference (RFC
         3986 §5). If `path` is itself an absolute URI, it replaces this one

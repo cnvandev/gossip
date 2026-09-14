@@ -46,6 +46,51 @@ class TestSSDPTarget:
         assert str(target) == "urn:dial-multiscreen-org:serviceId:dial"
 
 
+class TestSSDPTargetCovers:
+    """`SSDPTarget.covers()` overrides `URI.covers()`'s exact-equality
+    default with an `ssdp:all` wildcard that covers every target; any
+    other target falls back to that same exact-equality default. The
+    comparison operators (`<=`, `>=`, `<`, `>`) aren't redefined here -
+    they're inherited from `URI` and dispatch to this override."""
+
+    def test_all_covers_any_target(self):
+        """`ssdp:all` covers any other target."""
+        assert SSDPTarget.all().covers(SSDPTarget.root())
+
+    def test_all_covers_itself(self):
+        """`ssdp:all` covers itself."""
+        assert SSDPTarget.all().covers(SSDPTarget.all())
+
+    def test_a_concrete_target_falls_back_to_exact_equality(self):
+        """A concrete (non-wildcard) target covers an equal target, but not
+        a different one - the inherited `URI.covers()` behavior."""
+        assert SSDPTarget.device_type("Foo").covers(SSDPTarget.device_type("Foo"))
+        assert not SSDPTarget.root().covers(SSDPTarget.device_type("Foo"))
+
+    def test_le_dispatches_to_the_wildcard_override(self):
+        """`<=` (inherited from `URI`, unchanged) dispatches to
+        `SSDPTarget.covers()` - any target is `<=` the `ssdp:all`
+        wildcard, but not the other way around."""
+        assert SSDPTarget.root() <= SSDPTarget.all()
+        assert not (SSDPTarget.all() <= SSDPTarget.root())
+
+    def test_ge_dispatches_to_the_wildcard_override(self):
+        """`>=` (inherited from `URI`, unchanged) dispatches to
+        `SSDPTarget.covers()` - the `ssdp:all` wildcard is `>=` any
+        target, but not the other way around."""
+        assert SSDPTarget.all() >= SSDPTarget.root()
+        assert not (SSDPTarget.root() >= SSDPTarget.all())
+
+    def test_lt_is_true_for_a_concrete_target_against_the_wildcard(self):
+        """A concrete target is strictly `<` the wildcard: the wildcard
+        covers it, but it doesn't cover the wildcard back."""
+        assert SSDPTarget.root() < SSDPTarget.all()
+
+    def test_gt_is_true_for_the_wildcard_against_a_concrete_target(self):
+        """The wildcard is strictly `>` any concrete target."""
+        assert SSDPTarget.all() > SSDPTarget.root()
+
+
 class TestUniqueServiceName:
     """Converting a USN to and from its `UDN::target` (or bare `UDN`)
     string form."""
