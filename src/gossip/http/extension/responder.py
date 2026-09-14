@@ -9,9 +9,9 @@ from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
 from gossip.http.field import parse_field_values
 from gossip.http.message import HTTPRequest, HTTPResponse
-from gossip.http.predicate import RequestPredicate
 from gossip.http.resource import ResourceCollection
 from gossip.http.responder import HTTPResponder
+from gossip.internet.predicate import RequestPredicate
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 

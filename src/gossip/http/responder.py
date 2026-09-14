@@ -7,9 +7,9 @@ from typing import Any
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest, HTTPResponse
-from gossip.http.predicate import RequestPredicate
 from gossip.http.resource import ResourceCollection
 from gossip.internet.mime import MediaType
+from gossip.internet.predicate import RequestPredicate
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint

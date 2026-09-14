@@ -1,7 +1,7 @@
 from langcodes import Language
 
-from gossip.http.predicate import LanguagePredicate, MediaTypePredicate, StringPredicate
 from gossip.internet.mime import MediaType
+from gossip.internet.predicate import LanguagePredicate, MediaTypePredicate, StringPredicate
 
 
 class TestMediaTypePredicate:

@@ -2,46 +2,15 @@ import logging
 from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader
 from collections import UserDict
-from collections.abc import Buffer, Mapping
+from collections.abc import Mapping
 from http import HTTPMethod
 from typing import Any, Self
 
-from gossip.http.predicate import RequestPredicate
+from gossip.internet.predicate import RequestPredicate
 from gossip.internet.uri import URI
-from gossip.utils.multidict import multidict
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
-
-
-class Resource:
-    """A representation of the specific resource carried by an HTTP
-    message: the URL identifying it, its headers, and a readable body.
-
-    `body` is used exactly as given - unbounded, with no `Content-Length`
-    cutoff applied here (that used to come from wrapping it in a
-    `BoundedReader`, which this class no longer does).
-    """
-
-    identifier: URI
-    headers: multidict
-    body: StreamReader
-
-    def __init__(self, identifier: URI, headers: Mapping[str, str], body: StreamReader):
-        self.identifier = identifier
-        self.headers = multidict(headers)
-        self.body = body
-
-    async def read_body(self) -> Buffer | None:
-        """Materializes this resource's body into a `Buffer` by reading
-        `body` until EOF.
-
-        A caller that wants to pump a live body straight through as it
-        arrives (e.g. an audio stream to speakers), in batches, via its
-        own streaming parser, should read `self.body` directly instead of
-        going through `read_body()`.
-        """
-        return await self.body.read()
 
 
 class ResourceCollection(UserDict[str, dict[str, str]], ABC):
@@ -81,7 +50,11 @@ class ResourceCollection(UserDict[str, dict[str, str]], ABC):
         (i.e. codec settings, etc.) If the predicate rejects the request,
         the option is `False`y.
         """
-        return {header: next(iter(predicate.accepts(request_headers.get(header, ""))), (None, {})) for header, predicate in self.predicates.items() if header in request_headers}
+        return {
+            header: next(iter(predicate.accepts(request_headers.get(header, ""))), (None, {}))
+            for header, predicate in self.predicates.items()
+            if header in request_headers
+        }
 
     def subcollections(self) -> Mapping[URI, Self]:
         """Return a mapping of collections in this resource, if any.

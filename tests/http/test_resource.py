@@ -1,9 +1,8 @@
 import pytest
 
-from gossip.http.predicate import StringPredicate
-from gossip.http.resource import Resource, ResourceCollection
+from gossip.http.resource import ResourceCollection
+from gossip.internet.predicate import StringPredicate
 from gossip.internet.uri import URI
-from gossip.network.serializer import BufferedReader
 
 from ..support.resources import InMemoryResource
 
@@ -42,36 +41,6 @@ class _FullyWritable(_RepresentOnly):
 
     async def delete(self, exact_uri, constraints):
         raise NotImplementedError
-
-
-class TestResourceConstruction:
-    """Building a `Resource` from its identifying URL, headers, and body."""
-
-    def test_identifier_and_headers_are_stored(self):
-        """`identifier` is stored as given; `headers` is case-insensitive."""
-        resource = Resource(TARGET, {"Content-Type": "text/plain"}, BufferedReader.for_bytes(b""))
-        assert resource.identifier == TARGET
-        assert resource.headers["content-type"] == "text/plain"
-
-    def test_body_is_used_exactly_as_given(self):
-        """`body` is the same object passed in, not a copy."""
-        body = BufferedReader.for_bytes(b"hello")
-        resource = Resource(TARGET, {}, body)
-        assert resource.body is body
-
-
-class TestResourceReadBody:
-    """`read_body()` - materializes a resource's body into a `Buffer`."""
-
-    async def test_reads_the_whole_body(self):
-        """Reads the entire body content into a single `Buffer`."""
-        resource = Resource(TARGET, {}, BufferedReader.for_bytes(b"hello world"))
-        assert await resource.read_body() == b"hello world"
-
-    async def test_empty_body_reads_nothing(self):
-        """An empty body reads back as empty."""
-        resource = Resource(TARGET, {}, BufferedReader.for_bytes(b""))
-        assert await resource.read_body() == b""
 
 
 class TestResourceCollectionIsRepresentable:

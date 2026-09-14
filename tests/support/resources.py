@@ -7,8 +7,8 @@ a request to, without a real resource behind it.
 from collections.abc import Mapping
 from typing import Any
 
-from gossip.http.predicate import RequestPredicate
 from gossip.http.resource import ResourceCollection
+from gossip.internet.predicate import RequestPredicate
 from gossip.internet.uri import URI
 from gossip.network.serializer import BufferedReader
 

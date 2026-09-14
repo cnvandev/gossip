@@ -2,9 +2,9 @@ from ipaddress import IPv4Address
 from uuid import UUID
 
 from gossip.http.message import HTTPRequest
-from gossip.http.predicate import StringPredicate
 from gossip.http.resource import ResourceCollection
 from gossip.http.responder import HTTPResponder
+from gossip.internet.predicate import StringPredicate
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.ssdp.extension import DISCOVER

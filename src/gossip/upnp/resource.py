@@ -3,8 +3,8 @@ from asyncio.streams import StreamReader
 from collections.abc import Mapping
 from typing import Any
 
-from gossip.http.predicate import StringPredicate
 from gossip.http.resource import ResourceCollection
+from gossip.internet.predicate import StringPredicate
 from gossip.internet.uri import URI
 from gossip.network.serializer import BufferedReader
 from gossip.ssdp.headers import BOOT_ID, CONFIG_ID

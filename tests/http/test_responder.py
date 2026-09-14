@@ -3,8 +3,8 @@ from http import HTTPMethod, HTTPStatus
 from ipaddress import IPv4Address
 
 from gossip.http.message import HTTPRequest
-from gossip.http.predicate import StringPredicate
 from gossip.http.responder import STAR_PATH, TIME_FORMAT, HTTPResponder
+from gossip.internet.predicate import StringPredicate
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
