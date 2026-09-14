@@ -18,6 +18,15 @@ LOCAL = Endpoint(IPv4Address("10.0.0.2"), 80)
 UDN = UUID("11111111-1111-1111-1111-111111111111")
 
 
+class _StubResource(ResourceCollection):
+    """A `ResourceCollection` that exists only to be instantiated -
+    these tests exercise `DISCOVER.search()`'s predicate/data matching,
+    never `represent()`."""
+
+    async def represent(self, exact_uri, constraints):
+        raise NotImplementedError
+
+
 class TestDiscoverExtensionSearch:
     """`DiscoverExtension.search()` responds once per matching target under the
     responder's registered resources, for either an exact `ST` target or the
@@ -63,7 +72,7 @@ class TestDiscoverExtensionSearch:
     async def test_a_target_failing_an_unrelated_predicate_is_excluded(self):
         """A target satisfying `ST` but failing another predicate (e.g.
         `Accept`) is excluded."""
-        collection = ResourceCollection(
+        collection = _StubResource(
             predicates={
                 "ST": StringPredicate(["urn:test:device:Foo:1"]),
                 "Accept": StringPredicate(["text/xml"]),
@@ -78,7 +87,7 @@ class TestDiscoverExtensionSearch:
 
     async def test_a_target_satisfying_every_predicate_is_still_included(self):
         """A target satisfying every predicate is included."""
-        collection = ResourceCollection(
+        collection = _StubResource(
             predicates={
                 "ST": StringPredicate(["urn:test:device:Foo:1"]),
                 "Accept": StringPredicate(["text/xml"]),

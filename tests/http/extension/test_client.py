@@ -1,10 +1,25 @@
-from http import HTTPMethod
+import asyncio
+from http import HTTPMethod, HTTPStatus
+from ipaddress import IPv4Address
+
+from netifaces import AF_INET
 
 from gossip.http.extension.client import ExtendedHTTPClient
 from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
 from gossip.http.field import parse_field_values
+from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.internet.uri import URI
+from gossip.network.binding import Binding
+from gossip.network.interface import Interface
+from gossip.network.radio import Radio
+from gossip.network.replier import Replier
+
+from ...support.http import echo_request
+from ...support.network import free_tcp_port, free_udp_port
+
+LOOPBACK = IPv4Address("127.0.0.1")
+MULTICAST_GROUP = IPv4Address("239.255.255.250")
 
 
 class TestExtendedHTTPClientExtendWithNoExtensions:
@@ -117,3 +132,107 @@ class TestExtendedHTTPClientExtendHopByHopConnection:
         extension = Extension("my-ext", scope=Scope.END_TO_END)
         _, headers = ExtendedHTTPClient().extend(HTTPMethod.GET, None, {Strength.MANDATORY: {extension: {"Foo": "bar"}}})
         assert "Connection" not in headers
+
+
+class TestExtendedHTTPClientRequestTcp:
+    """`ExtendedHTTPClient.request_tcp()` extends the request, then sends
+    it over a real TCP connection the same way `HTTPClient.request()`
+    does."""
+
+    async def test_sends_the_extended_method_and_declaration(self):
+        """A mandatory extension's `M-`-prefixed method and declaration
+        header actually reach the server."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+        extension = Extension("my-ext")
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            client = ExtendedHTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+            response = await client.request_tcp("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}})
+
+            assert response is not None
+            assert response.status == HTTPStatus.OK
+            assert response.headers["Test-Request-Method"] == "M-GET"
+            assert response.headers["Test-Request-Man"] == "my-ext"
+
+
+class TestExtendedHTTPClientRequestUdp:
+    """`ExtendedHTTPClient.request_udp()` extends the request, then sends
+    it over UDP and returns the deserialized reply."""
+
+    async def test_sends_the_extended_method_and_declaration(self):
+        """A mandatory extension's `M-`-prefixed method and declaration
+        header actually reach the server."""
+        radio = Radio.loopback()
+
+        async with Replier(callback=echo_request, udp={0: HTTPRequest.read_from}, radio=radio) as replier:
+            _, port = replier.udp_transports[0].get_extra_info("sockname")
+            extension = Extension("my-ext")
+
+            client = ExtendedHTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+            response = await client.request_udp("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}})
+
+            assert response is not None
+            assert response.status == HTTPStatus.OK
+            assert response.headers["Test-Request-Method"] == "M-GET"
+            assert response.headers["Test-Request-Man"] == "my-ext"
+
+
+class TestExtendedHTTPClientBroadcast:
+    """`ExtendedHTTPClient.broadcast()` extends the request, then
+    broadcasts it and gathers raw replies the same way
+    `Prompter.broadcast()` does."""
+
+    async def test_sends_the_extended_method_and_declaration(self):
+        """A mandatory extension's `M-`-prefixed method and declaration
+        header actually reach whoever's listening."""
+        responder_radio = Radio.loopback()
+        port = await free_udp_port(responder_radio)
+
+        # `broadcast=None` sends the datagram to the binding's own
+        # address (this test's `Replier`) instead of `MULTICAST_GROUP` -
+        # which still has to be a real multicast address, since joining
+        # it as a group happens regardless of where the datagram is sent.
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=None),)}),))
+        extension = Extension("my-ext")
+
+        async with Replier(callback=echo_request, udp={port: HTTPRequest.read_from}, radio=responder_radio):
+            client = ExtendedHTTPClient(radio=radio)
+            uri = URI.http(f"//{MULTICAST_GROUP}:{port}/")
+            future = await client.broadcast("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}})
+            [result] = await asyncio.wait_for(future, timeout=2)
+
+            assert result is not None
+            reply = await HTTPResponse.read_from(result)
+            assert reply is not None
+            assert reply.status == HTTPStatus.OK
+            assert reply.headers["Test-Request-Method"] == "M-GET"
+            assert reply.headers["Test-Request-Man"] == "my-ext"
+
+
+class TestExtendedHTTPClientBroadcastRequest:
+    """`ExtendedHTTPClient.broadcast_request()` extends the request, then
+    streams back deserialized replies the same way
+    `Prompter.broadcast_prompt()` does."""
+
+    async def test_streams_the_extended_methods_reply(self):
+        """A mandatory extension's `M-`-prefixed method and declaration
+        header actually reach whoever's listening."""
+        responder_radio = Radio.loopback()
+        port = await free_udp_port(responder_radio)
+
+        radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK, broadcast=None),)}),))
+        extension = Extension("my-ext")
+
+        async with Replier(callback=echo_request, udp={port: HTTPRequest.read_from}, radio=responder_radio):
+            client = ExtendedHTTPClient(radio=radio)
+            uri = URI.http(f"//{MULTICAST_GROUP}:{port}/")
+            replies = await client.broadcast_request("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}})
+
+            async with replies.stream() as streamer:
+                reply = await asyncio.wait_for(anext(aiter(streamer)), timeout=2)
+                assert reply.status == HTTPStatus.OK
+                assert reply.headers["Test-Request-Method"] == "M-GET"
+                assert reply.headers["Test-Request-Man"] == "my-ext"

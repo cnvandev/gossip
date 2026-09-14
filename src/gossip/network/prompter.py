@@ -74,44 +74,51 @@ class Prompter[Reply: Serializable]:
         transport, reply_protocol = await self.radio.udp_send(remote_host)
         log.debug("Connected to UDP %s, sending prompt %r", remote_host, prompt)
 
-        # Listen for a reply on TCP or UDP, whichever is specified. This must
-        # happen before we send the message so we have the outgoing port
-        # to tell people to reply on (i.e. on a `Host` header in the message).
-        if tcp_port is not None:
-            log.debug("Listening for replies on TCP: %s", tcp_port)
+        try:
+            # Listen for a reply on TCP or UDP, whichever is specified. This
+            # must happen before we send the message so we have the outgoing
+            # port to tell people to reply on (i.e. on a `Host` header in the
+            # message).
+            if tcp_port is not None:
+                log.debug("Listening for replies on TCP: %s", tcp_port)
 
-            async def tcp_callback(reader: StreamReader, _: StreamWriter):
-                reply = await self.deserializer(reader)
-                if reply is not None:
-                    reply_future.set_result(reply)
-
-            _ = await self.radio.tcp_listen(tcp_callback, tcp_port)
-        else:
-            # Otherwise we'll just use the existing UDP transport.
-            _, udp_port = transport.get_extra_info("sockname")
-            log.debug("Listening for replies on existing UDP: %s", udp_port)
-
-            async def udp_callback(data_future: Awaitable[tuple[bytes, Endpoint] | None]):
-                result = await data_future
-                if result is not None:
-                    reply = await self.deserializer(result)
+                async def tcp_callback(reader: StreamReader, _: StreamWriter):
+                    reply = await self.deserializer(reader)
                     if reply is not None:
-                        return reply
+                        reply_future.set_result(reply)
+
+                _ = await self.radio.tcp_listen(tcp_callback, tcp_port)
+            else:
+                # Otherwise we'll just use the existing UDP transport.
+                _, udp_port = transport.get_extra_info("sockname")
+                log.debug("Listening for replies on existing UDP: %s", udp_port)
+
+                async def udp_callback(data_future: Awaitable[tuple[bytes, Endpoint] | None]):
+                    result = await data_future
+                    if result is not None:
+                        reply = await self.deserializer(result)
+                        if reply is not None:
+                            return reply
+                        else:
+                            # No reply, nothing to send back.
+                            return None
                     else:
-                        # No reply, nothing to send back.
+                        # No data received, nothing to deserialize.
                         return None
-                else:
-                    # No data received, nothing to deserialize.
-                    return None
 
-            # Because we don't have to wait for a connection, we can just return a task.
-            reply_future = asyncio.create_task(udp_callback(reply_protocol.reply))
+                # Because we don't have to wait for a connection, we can just return a task.
+                reply_future = asyncio.create_task(udp_callback(reply_protocol.reply))
 
-        serialized = bytes(prompt)
-        transport.sendto(serialized)
-        log.info("Sent %r (%d bytes) to %s.", prompt, len(serialized), remote_host)
+            serialized = bytes(prompt)
+            transport.sendto(serialized)
+            log.info("Sent %r (%d bytes) to %s.", prompt, len(serialized), remote_host)
 
-        return await asyncio.wait_for(reply_future, timeout=ttl)
+            return await asyncio.wait_for(reply_future, timeout=ttl)
+        finally:
+            # The UDP send transport is only ever used by this call - close it
+            # once we're done with it, whether that's a reply, a timeout, or
+            # anything else, rather than leaking it.
+            transport.close()
 
     async def broadcast(self, prompt: Serializable | Callable[[Endpoint], Serializable], host: Endpoint) -> Future[list[tuple[bytes, Endpoint] | None]]:
         """Sends out a prompt broadcast datagram on every interface.

@@ -127,3 +127,16 @@ class TestUPnPDeviceRepresent:
         body, _metadata = await resource.represent(exact_uri, {})
         xml = (await body.read()).decode("utf-8")
         assert str(exact_uri) in xml
+
+
+class TestUPnPDeviceOptions:
+    """`UPnPDevice.options()` - a device's descriptor is only ever
+    fetched, never written to."""
+
+    async def test_only_allows_get_and_head(self):
+        """`Allow` doesn't include `PUT`/`PATCH`/`DELETE` - a descriptor
+        document is only ever fetched, never written to."""
+        device = DummyDevice("mydevice", udn=UDN)
+        resource = UPnPDevice(device)
+        options = await resource.options(URI.parse("/device.xml"), {})
+        assert options == {"Allow": "GET, HEAD, OPTIONS, CONNECT, TRACE"}

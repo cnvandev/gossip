@@ -1,7 +1,9 @@
 import logging
+from abc import ABC, abstractmethod
 from asyncio.streams import StreamReader
 from collections import UserDict
 from collections.abc import Buffer, Mapping
+from http import HTTPMethod
 from typing import Any, Self
 
 from gossip.http.predicate import RequestPredicate
@@ -42,7 +44,7 @@ class Resource:
         return await self.body.read()
 
 
-class ResourceCollection(UserDict[str, dict[str, str]]):
+class ResourceCollection(UserDict[str, dict[str, str]], ABC):
     """A collection of resources under a top-level Uniform Resource Identifier.
 
     A resource is anything identifiable via Uniform Resource Identifier
@@ -89,13 +91,26 @@ class ResourceCollection(UserDict[str, dict[str, str]]):
         return {}
 
     async def options(self, uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> Mapping[str, str]:
-        """Return the different representation options for this resource."""
-        raise NotImplementedError("ResourceCollection subclasses need to implement options()")
+        """Return the different representation options for this resource.
 
+        `GET`/`HEAD` are always allowed - `represent()` is required of
+        every resource. `PUT`/`PATCH`/`DELETE` are allowed only when
+        this subclass actually overrides the matching method, rather
+        than leaving it as the base "not supported" default.
+        """
+        methods = [HTTPMethod.GET, HTTPMethod.HEAD, HTTPMethod.OPTIONS, HTTPMethod.CONNECT, HTTPMethod.TRACE]
+        if type(self).write is not ResourceCollection.write:
+            methods.append(HTTPMethod.PUT)
+        if type(self).patch is not ResourceCollection.patch:
+            methods.append(HTTPMethod.PATCH)
+        if type(self).delete is not ResourceCollection.delete:
+            methods.append(HTTPMethod.DELETE)
+        return {"Allow": ", ".join(methods)}
+
+    @abstractmethod
     async def represent(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None]) -> tuple[StreamReader | None, Mapping[str, str]]:
         """Respond to a request for the exact under the requested constraints."""
-        # Something to conform the object to the constraints.
-        raise NotImplementedError("ResourceCollection subclasses need to implement represent()")
+        ...
 
     async def write(self, exact_uri: URI, constraints: Mapping[str, tuple[Any, Mapping[str, str]] | None], request_body: StreamReader | None) -> tuple[StreamReader | None, Mapping[str, str]]:
         """Write the body of the request to the resource."""

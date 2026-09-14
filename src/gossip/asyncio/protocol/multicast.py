@@ -49,7 +49,11 @@ class MulticastDatagramProtocol(DatagramProtocol):
                 interface = socket.inet_aton(self.interface_address)
             else:
                 log.debug("%s not filtering by interface", self.__class__.__name__)
-                interface = bytes(socket.INADDR_ANY)
+                # `bytes(socket.INADDR_ANY)` would be wrong here - INADDR_ANY
+                # is the int 0, so that builds an *empty* bytes object, not
+                # the 4 zero bytes `IP_ADD_MEMBERSHIP` actually needs for
+                # "any interface".
+                interface = socket.inet_aton("0.0.0.0")
             sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, group + interface)
 
             # Allow loopback multicast packets to be received, so we can work

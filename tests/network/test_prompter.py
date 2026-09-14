@@ -131,6 +131,28 @@ class TestPrompterPromptUdp:
             with pytest.raises(TimeoutError):
                 await prompter.prompt_udp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, silent_port))
 
+    async def test_returns_none_when_the_connection_closes_with_nothing_received(self):
+        """The connection closing with nothing ever received comes back
+        as `None`, the same as an unparseable reply does.
+
+        Nothing in `prompt_udp()`'s own code path closes its UDP
+        transport before a reply or a timeout, so this forces it via a
+        `Radio` that closes its own `udp_send()` transport immediately
+        - simulating a real connection-closed condition rather than
+        one `prompt_udp()` could ever trigger itself."""
+
+        class SelfClosingRadio(Radio):
+            async def udp_send(self, endpoint):
+                transport, protocol = await super().udp_send(endpoint)
+                transport.close()
+                return transport, protocol
+
+        radio = SelfClosingRadio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
+        prompter = Prompter(HTTPResponse.read_from, radio=radio)
+        reply = await prompter.prompt_udp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, 1))
+
+        assert reply is None
+
     async def test_returns_the_deserialized_reply_over_tcp_when_a_tcp_port_is_given(self):
         """With a `tcp_port`, the reply is read from a TCP connection to
         that port instead of the UDP socket."""
