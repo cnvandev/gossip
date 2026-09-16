@@ -18,6 +18,7 @@ from gossip.network.replier import Replier
 from ..support.asyncio import StaticReplyProtocol, wait_closing
 from ..support.http import echo_request
 from ..support.network import free_tcp_port
+from ..support.streams import RecordingWriter
 
 LOOPBACK = IPv4Address("127.0.0.1")
 MULTICAST_GROUP = IPv4Address("239.255.255.250")
@@ -62,6 +63,75 @@ class TestPrompterPromptTcp:
             assert reply is not None
             assert reply.status == HTTPStatus.OK
             assert reply.headers["Test-Request-Method"] == "GET"
+
+    async def test_leaves_the_connection_open_for_a_non_terminal_reply(self):
+        """A reply that isn't terminal (HTTP/1.1, no `Connection` header)
+        leaves the connection open once `prompt_tcp()` returns.
+
+        Checked by recording whether `prompt_tcp()` itself ever called
+        `close()`, rather than by watching the peer for an EOF - an
+        abandoned-but-not-explicitly-closed `StreamWriter` still gets
+        closed by its own `__del__` once nothing references it, and
+        *when* that happens is up to the garbage collector, not
+        `prompt_tcp()`. That makes EOF an unreliable signal here (see
+        `RecordingWriter`)."""
+
+        class RecordingRadio(Radio):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.writer: RecordingWriter | None = None
+
+            async def tcp_send(self, remote):
+                reader, writer = await super().tcp_send(remote)
+                self.writer = RecordingWriter(writer)
+                return reader, self.writer
+
+        radio = RecordingRadio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+
+            assert reply is not None
+            assert reply.is_terminal() is False
+            assert radio.writer is not None
+            assert radio.writer.closed is False
+
+            # Our own code chose not to close it - we still have to, so
+            # the connection doesn't leak past this test.
+            radio.writer.close()
+            await radio.writer.wait_closed()
+
+    async def test_closes_the_connection_for_a_terminal_reply(self):
+        """A reply with `Connection: close` closes the connection once
+        `prompt_tcp()` returns - observed as EOF from the server side."""
+        loop = asyncio.get_running_loop()
+        connection = loop.create_future()
+
+        async def on_connection(reader, writer):
+            await HTTPRequest.read_from(reader)
+            await HTTPResponse(HTTPStatus.OK, {"Connection": "close"}).write_to(writer)
+            connection.set_result((reader, writer))
+
+        radio = Radio.loopback()
+        server = await radio.tcp_listen(on_connection)
+        async with wait_closing(server):
+            _, port = server.sockets[0].getsockname()
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            assert reply is not None
+
+            server_reader, server_writer = await connection
+            data = await asyncio.wait_for(server_reader.read(), timeout=0.5)
+            assert data == b""
+
+            # The client already closed its end; close ours too, so
+            # `wait_closing(server)` below doesn't hang - `asyncio.Server`
+            # tracks its accepted connections and won't consider itself
+            # closed until they are too.
+            server_writer.close()
+            await server_writer.wait_closed()
 
     async def test_returns_none_for_an_unparseable_reply(self):
         """A reply the deserializer can't parse comes back as `None`."""
@@ -324,6 +394,51 @@ class TestPrompterBroadcastPrompt:
             async with replies.stream() as streamer:
                 reply = await asyncio.wait_for(anext(aiter(streamer)), timeout=2)
                 assert reply.status == HTTPStatus.OK
+
+    async def test_closes_the_tcp_connection_for_a_terminal_reply(self):
+        """A reply with `Connection: close` closes the TCP connection it
+        arrived on, same as `prompt_tcp()` does - checked from the reply
+        sender's side, since that's a real explicit `close()`, not one
+        racing the garbage collector (see the note on
+        `test_leaves_the_connection_open_for_a_non_terminal_reply`)."""
+        loop = asyncio.get_running_loop()
+        radio = Radio.loopback(broadcast=None)
+        saw_eof: asyncio.Future[bytes] = loop.create_future()
+
+        class Responder(asyncio.DatagramProtocol):
+            def connection_made(self, transport):
+                self.transport = transport
+
+            def datagram_received(self, data, addr):
+                async def reply_over_tcp():
+                    request = await HTTPRequest.read_from((data, Endpoint.for_addr(addr)))
+                    assert request is not None
+                    tcp_port = int(request.headers["X-Reply-Port"])
+                    reader, writer = await asyncio.open_connection(str(LOOPBACK), tcp_port)
+                    await HTTPResponse(HTTPStatus.OK, {"Connection": "close"}).write_to(writer)
+                    saw_eof.set_result(await reader.read())
+                    writer.close()
+                    await writer.wait_closed()
+
+                asyncio.get_running_loop().create_task(reply_over_tcp())
+
+        responder_transport, _ = await loop.create_datagram_endpoint(Responder, local_addr=(str(LOOPBACK), 0))
+        with contextlib.closing(responder_transport):
+            _, responder_port = responder_transport.get_extra_info("sockname")
+
+            probe_transport, _ = await loop.create_datagram_endpoint(asyncio.DatagramProtocol, local_addr=(str(LOOPBACK), 0))
+            with contextlib.closing(probe_transport):
+                _, tcp_port = probe_transport.get_extra_info("sockname")
+
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+            request = HTTPRequest("GET", ROOT, {"X-Reply-Port": str(tcp_port)})
+            replies = await prompter.broadcast_prompt(request, Endpoint(MULTICAST_GROUP, responder_port), tcp_port=tcp_port)
+
+            async with replies.stream() as streamer:
+                reply = await asyncio.wait_for(anext(aiter(streamer)), timeout=2)
+                assert reply.status == HTTPStatus.OK
+
+            assert await asyncio.wait_for(saw_eof, timeout=2) == b""
 
 
 class TestQueueIterator:

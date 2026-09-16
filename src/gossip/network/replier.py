@@ -73,13 +73,17 @@ class Replier[Prompt: Serializable]:
                 local_endpoint = Endpoint.for_addr(local_address)
 
                 replies = await self.callback(prompt, remote_endpoint, local_endpoint)
+                last_reply = None
                 for reply in replies:
+                    last_reply = reply
                     log.debug("Writing reply %r to TCP %s", reply, remote_endpoint)
                     await reply.write_to(tcp_writer)
                     await tcp_writer.drain()
-                log.debug("Done, closing connection to TCP %s.", remote_endpoint)
-                tcp_writer.close()
-                await tcp_writer.wait_closed()
+
+                if last_reply is None or last_reply.is_terminal():
+                    log.debug("Closing connection to TCP %s.", remote_endpoint)
+                    tcp_writer.close()
+                    await tcp_writer.wait_closed()
 
             listeners += (self.radio.tcp_listen(tcp_callback, port),)
             port_strings += (f"TCP port {port}",)

@@ -71,6 +71,23 @@ class HTTPMessage(ABC):
         """Stream this message to a writer, body (and any trailers) included."""
         await self.message.write_to(writer)
 
+    def is_terminal(self) -> bool:
+        """Return whether this is the final message in a session.
+
+        HTTP protocol versions treat this differently, 1.1 keeps the connection
+        alive unless `Connection: close` is specified, while 1.0 closes it unless
+        `Connection: keep-alive` is specified.
+        """
+        connection_values = {value.lower() for value, _ in parse_field_values(self.headers.get("Connection", ""))}
+        if self.protocol.version == "1.1":
+            # HTTP/1.1 keeps alive unless close is specified
+            return "close" in connection_values
+        elif self.protocol.version == "1.0":
+            # HTTP/1.0 closes unless keep-alive is specified
+            return "keep-alive" not in connection_values
+        else:
+            return super().is_terminal()
+
 
 class HTTPRequest(HTTPMessage, Serializable):
     """A request for a resource that matches the accept constraints."""

@@ -183,6 +183,64 @@ class TestHTTPRequestReadFrom:
         assert await HTTPRequest.read_from((b"", ENDPOINT)) is None
 
 
+class TestHTTPMessageIsTerminal:
+    """`HTTPMessage.is_terminal()` - whether a message is the last one on
+    its connection, per RFC 9110's `Connection` header semantics and
+    each protocol version's own keep-alive default."""
+
+    def test_http_1_1_with_no_connection_header_is_not_terminal(self):
+        """HTTP/1.1 is persistent by default - no header needed to keep it alive."""
+        response = HTTPResponse(HTTPStatus.OK, protocol=Product("HTTP", "1.1"))
+        assert response.is_terminal() is False
+
+    def test_http_1_1_with_connection_close_is_terminal(self):
+        """An explicit `Connection: close` ends an HTTP/1.1 connection."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "close"}, protocol=Product("HTTP", "1.1"))
+        assert response.is_terminal() is True
+
+    def test_http_1_1_connection_close_is_case_insensitive(self):
+        """The `close` token is matched regardless of casing."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "Close"}, protocol=Product("HTTP", "1.1"))
+        assert response.is_terminal() is True
+
+    def test_http_1_1_with_connection_keep_alive_is_not_terminal(self):
+        """A redundant `keep-alive` on HTTP/1.1 doesn't change anything - still not terminal."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "keep-alive"}, protocol=Product("HTTP", "1.1"))
+        assert response.is_terminal() is False
+
+    def test_http_1_1_honors_close_among_multiple_connection_values(self):
+        """A `close` anywhere in a comma-separated `Connection` list is enough."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "close, Upgrade"}, protocol=Product("HTTP", "1.1"))
+        assert response.is_terminal() is True
+
+    def test_http_1_0_with_no_connection_header_is_terminal(self):
+        """HTTP/1.0 closes by default - no header needed to end it."""
+        response = HTTPResponse(HTTPStatus.OK, protocol=Product("HTTP", "1.0"))
+        assert response.is_terminal() is True
+
+    def test_http_1_0_with_connection_keep_alive_is_not_terminal(self):
+        """An explicit `Connection: keep-alive` keeps an HTTP/1.0 connection open."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "keep-alive"}, protocol=Product("HTTP", "1.0"))
+        assert response.is_terminal() is False
+
+    def test_http_1_0_with_connection_close_is_terminal(self):
+        """An explicit (if redundant) `Connection: close` on HTTP/1.0 is still terminal."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "close"}, protocol=Product("HTTP", "1.0"))
+        assert response.is_terminal() is True
+
+    def test_an_unrecognized_protocol_version_falls_back_to_the_default(self):
+        """A version that's neither 1.0 nor 1.1 defers to `Serializable`'s
+        default - terminal, regardless of any `Connection` header given."""
+        response = HTTPResponse(HTTPStatus.OK, {"Connection": "keep-alive"}, protocol=Product("HTTP", "2.0"))
+        assert response.is_terminal() is True
+
+    def test_http_request_inherits_the_same_behavior(self):
+        """`HTTPRequest` gets identical `is_terminal()` behavior from
+        `HTTPMessage` - not something each subclass has to reimplement."""
+        request = HTTPRequest(HTTPMethod.GET, URI.parse("/foo"), {"Connection": "close"}, protocol=Product("HTTP", "1.1"))
+        assert request.is_terminal() is True
+
+
 class TestHTTPResponseConstruction:
     """Building an `HTTPResponse` from a status and optional
     headers/body/protocol."""

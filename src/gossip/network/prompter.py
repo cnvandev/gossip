@@ -59,8 +59,9 @@ class Prompter[Reply: Serializable]:
         log.debug("Sent prompt to TCP %s", address)
         reply = await self.deserializer(reader)
         log.debug("Received reply %r from TCP %s", reply, address)
-        writer.close()
-        await writer.wait_closed()
+        if reply is None or reply.is_terminal():
+            writer.close()
+            await writer.wait_closed()
         return reply
 
     async def prompt_udp(self, prompt: Serializable, remote_host: Endpoint, tcp_port: int | None = None) -> Reply | None:
@@ -182,8 +183,9 @@ class Prompter[Reply: Serializable]:
                         await queue.put(tcp_reply)
 
                     log.debug("Done, closing connection to TCP %s.", endpoint)
-                    writer.close()
-                    await writer.wait_closed()
+                    if tcp_reply is None or tcp_reply.is_terminal():
+                        writer.close()
+                        await writer.wait_closed()
 
                 _ = await interface.tcp_listen(tcp_callback, port=tcp_port)
             else:

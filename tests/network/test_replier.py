@@ -19,6 +19,7 @@ from gossip.network.replier import Replier
 from ..support.asyncio import wait_closing
 from ..support.http import echo_request
 from ..support.network import await_reply, free_tcp_port, free_udp_port, real_interface_address
+from ..support.streams import RecordingWriter
 
 LOOPBACK = IPv4Address("127.0.0.1")
 ROOT = URI.parse("/")
@@ -110,6 +111,92 @@ class TestReplierTcp:
             assert reply_one.headers["Test-Request-X-Deserializer"] == "one"
             assert reply_two is not None
             assert reply_two.headers["Test-Request-X-Deserializer"] == "two"
+
+    async def test_leaves_the_connection_open_for_a_non_terminal_reply(self):
+        """A callback reply that isn't terminal (HTTP/1.1, no `Connection`
+        header) leaves the connection open after replying.
+
+        Checked by recording whether the `Replier` itself ever called
+        `close()` on the connection, rather than by watching for an EOF
+        on the client side - an abandoned-but-not-explicitly-closed
+        `StreamWriter` still gets closed by its own `__del__` once
+        nothing references it any more (which happens almost immediately
+        once `tcp_callback` returns, since nothing else holds onto it
+        yet - there's no connection pool keeping it alive here). *When*
+        exactly that happens is up to the garbage collector, not this
+        code, which makes EOF an unreliable signal (see
+        `RecordingWriter`)."""
+
+        class RecordingRadio(Radio):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.writer: RecordingWriter | None = None
+
+            async def tcp_listen(self, callback, port=None):
+                async def recording_callback(reader, writer):
+                    self.writer = RecordingWriter(writer)
+                    await callback(reader, self.writer)
+
+                return await super().tcp_listen(recording_callback, port)
+
+        radio = RecordingRadio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
+            async with wait_closing(writer):
+                await HTTPRequest("GET", ROOT).write_to(writer)
+                reply = await HTTPResponse.read_from(reader)
+                assert reply is not None
+                assert reply.is_terminal() is False
+
+            assert radio.writer is not None
+            assert radio.writer.closed is False
+
+            # The `Replier` chose not to close it - we still have to, so
+            # `Replier.__aexit__()`'s `server.wait_closed()` (which waits
+            # for every connection `asyncio.Server` still has open, not
+            # just the listening socket) doesn't hang on this one.
+            radio.writer.close()
+            await radio.writer.wait_closed()
+
+    async def test_closes_the_connection_for_a_terminal_reply(self):
+        """A callback reply with `Connection: close` closes the connection
+        right after replying."""
+
+        async def respond_with_close(request, remote, local):
+            return (HTTPResponse(HTTPStatus.OK, {"Connection": "close"}),)
+
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=respond_with_close, tcp={port: HTTPRequest.read_from}, radio=radio):
+            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
+            async with wait_closing(writer):
+                await HTTPRequest("GET", ROOT).write_to(writer)
+                reply = await HTTPResponse.read_from(reader)
+                assert reply is not None
+
+                data = await asyncio.wait_for(reader.read(), timeout=0.5)
+                assert data == b""
+
+    async def test_closes_the_connection_when_the_callback_returns_no_replies(self):
+        """No replies at all still closes the connection - `is_terminal()`
+        is only ever consulted when there's a last reply to check."""
+
+        async def respond_with_nothing(request, remote, local):
+            return ()
+
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=respond_with_nothing, tcp={port: HTTPRequest.read_from}, radio=radio):
+            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
+            async with wait_closing(writer):
+                await HTTPRequest("GET", ROOT).write_to(writer)
+
+                data = await asyncio.wait_for(reader.read(), timeout=0.5)
+                assert data == b""
 
     async def test_an_unparseable_request_never_reaches_the_callback(self):
         """A request the deserializer can't parse is dropped - the

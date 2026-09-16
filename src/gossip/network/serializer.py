@@ -22,6 +22,10 @@ class Serializable(SupportsBytes, Protocol):
         writer.write(bytes(self))
         await writer.drain()
 
+    def is_terminal(self) -> bool:
+        """Returns if this is the last message in a session (true by default.)"""
+        return True
+
     @classmethod
     async def read_from(cls, reader: StreamReader | tuple[bytes, Endpoint]) -> Self | None: ...
 

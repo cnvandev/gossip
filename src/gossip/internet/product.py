@@ -80,7 +80,7 @@ class ProductStack(NamedTuple):
     @override
     def __str__(self):
         """Returns a string representation of the agent, suitable for a header."""
-        return " ".join((str(product) for product in self.products))
+        return " ".join(str(product) for product in self.products)
 
     @classmethod
     def gossip(cls):
