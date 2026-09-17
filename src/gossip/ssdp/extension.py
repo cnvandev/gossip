@@ -29,9 +29,6 @@ class DiscoverExtension(Extension):
         The target resource for the request is always `*` according to the spec,
         so it will always be the `SSDPResponder`
         """
-        log.info("Remote: %s", remote)
-        log.info("Local: %s", local)
-
         search_header = request.headers.get("ST", "")
 
         # A subcollection's own predicates (its `ST` predicate included -
