@@ -259,3 +259,16 @@ class TestInternetMessageReadFromStream:
         parsed = await InternetMessage.read_from(reader)
         assert parsed is not None
         assert isinstance(parsed.body, StreamReader)
+
+    async def test_returns_none_for_a_clean_eof_with_nothing_sent(self):
+        """A stream that hits EOF before the header delimiter ever
+        arrives - e.g. a peer that closes without sending anything more -
+        returns `None` rather than raising `IncompleteReadError`."""
+        reader = BufferedReader.for_bytes(b"")
+        assert await InternetMessage.read_from(reader) is None
+
+    async def test_returns_none_for_a_clean_eof_mid_header(self):
+        """Same as above, but with a partial header already buffered when
+        the stream ends."""
+        reader = BufferedReader.for_bytes(b"GET /foo HTTP/1.1\r\nHost: example.com")
+        assert await InternetMessage.read_from(reader) is None

@@ -198,3 +198,9 @@ class InternetMessage(Serializable):
         except (UnicodeDecodeError, ValueError) as e:
             log.error(e)
             return None
+        except EOFError:
+            # The peer closed the connection before sending anything (or
+            # anything more) - not an error, just nothing left to read.
+            # `IncompleteReadError` (raised by `readuntil()`) is an
+            # `EOFError` subclass, so this also catches that.
+            return None

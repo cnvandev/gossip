@@ -22,12 +22,21 @@ class Replier[Prompt: Serializable]:
     sent back on the same transport. Subclasses can implement protocols which
     use other transports by returning None from the callback function in those
     cases.
+
+    A TCP connection is kept open for more than one prompt/reply cycle
+    as long as the last reply isn't terminal - closed once it is, once
+    the deserializer returns `None` (nothing more to read), or once
+    `tcp_idle_timeout` seconds pass without a new prompt arriving.
     """
 
     radio: Radio
     callback: Callable[[Prompt, Endpoint, Endpoint], Awaitable[Iterable[Serializable]]]
     tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]]
     udp: Mapping[int | Endpoint, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]]
+
+    """How long a TCP connection may sit idle, awaiting its next prompt,
+    before it's closed. `None` (the default) waits indefinitely."""
+    tcp_idle_timeout: float | None
 
     """The TCP servers and UDP transports opened by `__aenter__()` -
     empty until entered, closed again by `__aexit__()`."""
@@ -40,6 +49,7 @@ class Replier[Prompt: Serializable]:
         tcp: Mapping[int, Callable[[StreamReader], Awaitable[Prompt | None]]] | None = None,
         udp: Mapping[int | Endpoint, Callable[[tuple[bytes, Endpoint]], Awaitable[Prompt | None]]] | None = None,
         radio: Radio | None = None,
+        tcp_idle_timeout: float | None = None,
         *args,
         **kwargs,
     ):
@@ -47,6 +57,7 @@ class Replier[Prompt: Serializable]:
         self.tcp = tcp or {}
         self.udp = udp or {}
         self.radio = radio or Radio.from_netifaces()
+        self.tcp_idle_timeout = tcp_idle_timeout
         self.tcp_servers = ()
         self.udp_transports = ()
         super().__init__(*args, **kwargs)
@@ -62,28 +73,34 @@ class Replier[Prompt: Serializable]:
             async def tcp_callback(tcp_reader: StreamReader, tcp_writer: StreamWriter, deserializer: Callable[[StreamReader], Awaitable[Prompt | None]] = tcp_deserializer) -> None:
                 remote_address = tcp_writer.get_extra_info("peername")
                 remote_endpoint = Endpoint.for_addr(remote_address)
-                log.debug("Received prompt from TCP %s", remote_endpoint)
-
-                prompt = await deserializer(tcp_reader)
-                log.debug("Deserialized %r from TCP %s", prompt, remote_endpoint)
-                if prompt is None:
-                    return
-
-                local_address = tcp_writer.get_extra_info('sockname')
+                local_address = tcp_writer.get_extra_info("sockname")
                 local_endpoint = Endpoint.for_addr(local_address)
 
-                replies = await self.callback(prompt, remote_endpoint, local_endpoint)
-                last_reply = None
-                for reply in replies:
-                    last_reply = reply
-                    log.debug("Writing reply %r to TCP %s", reply, remote_endpoint)
-                    await reply.write_to(tcp_writer)
-                    await tcp_writer.drain()
+                while True:
+                    try:
+                        prompt = await asyncio.wait_for(deserializer(tcp_reader), timeout=self.tcp_idle_timeout)
+                    except TimeoutError:
+                        log.debug("TCP %s idle for %.1fs, closing.", remote_endpoint, self.tcp_idle_timeout)
+                        break
 
-                if last_reply is None or last_reply.is_terminal():
-                    log.debug("Closing connection to TCP %s.", remote_endpoint)
-                    tcp_writer.close()
-                    await tcp_writer.wait_closed()
+                    log.debug("Deserialized %r from TCP %s", prompt, remote_endpoint)
+                    if prompt is None:
+                        break
+
+                    replies = await self.callback(prompt, remote_endpoint, local_endpoint)
+                    last_reply = None
+                    for reply in replies:
+                        last_reply = reply
+                        log.debug("Writing reply %r to TCP %s", reply, remote_endpoint)
+                        await reply.write_to(tcp_writer)
+                        await tcp_writer.drain()
+
+                    if last_reply is None or last_reply.is_terminal():
+                        break
+
+                log.debug("Closing connection to TCP %s.", remote_endpoint)
+                tcp_writer.close()
+                await tcp_writer.wait_closed()
 
             listeners += (self.radio.tcp_listen(tcp_callback, port),)
             port_strings += (f"TCP port {port}",)

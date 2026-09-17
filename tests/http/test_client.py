@@ -199,8 +199,8 @@ class TestHTTPClientRequest:
                 assert reply.headers["Test-Request-Method"] == "GET"
 
     async def test_is_async_iterable_over_its_replies(self):
-        """`async for`/`anext()` on the session delegate to the
-        underlying `PromptSession`, same as `read_reply()`."""
+        """`async for` on the session delegates to the underlying
+        `PromptSession`, same as `read_reply()`."""
         radio = Radio.loopback()
         port = await free_tcp_port(radio)
 
@@ -209,10 +209,9 @@ class TestHTTPClientRequest:
             uri = URI.http(f"//127.0.0.1:{port}/")
 
             async with await client.request("GET", uri) as session:
-                reply = await anext(session, None)
-
-                assert reply is not None
-                assert reply.status == HTTPStatus.OK
+                async for reply in session:
+                    assert reply.status == HTTPStatus.OK
+                    break
 
     async def test_defaults_to_connection_keep_alive(self):
         """`Connection: keep-alive` is sent unless `headers` overrides

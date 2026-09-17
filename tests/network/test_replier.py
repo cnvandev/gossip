@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-from asyncio.streams import StreamWriter
 from http import HTTPStatus
 from ipaddress import IPv4Address
 
@@ -52,6 +51,17 @@ class TestReplierInit:
         replier = Replier(callback=echo_request)
         assert isinstance(replier.radio, Radio)
 
+    def test_defaults_to_no_tcp_idle_timeout(self):
+        """Omitting `tcp_idle_timeout` waits indefinitely for a
+        connection's next prompt."""
+        replier = Replier(callback=echo_request, radio=Radio.loopback())
+        assert replier.tcp_idle_timeout is None
+
+    def test_stores_the_given_tcp_idle_timeout(self):
+        """A given `tcp_idle_timeout` is stored as-is."""
+        replier = Replier(callback=echo_request, radio=Radio.loopback(), tcp_idle_timeout=5.0)
+        assert replier.tcp_idle_timeout == 5.0
+
 
 class TestReplierEnter:
     """`Replier.__aenter__()` needs at least one TCP or UDP listener to
@@ -75,12 +85,12 @@ class TestReplierTcp:
 
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
-            reply = await session.read_reply()
+            async with await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port)) as session:
+                reply = await session.read_reply()
 
-            assert reply is not None
-            assert reply.status == HTTPStatus.OK
-            assert reply.headers["Test-Request-Method"] == "GET"
+                assert reply is not None
+                assert reply.status == HTTPStatus.OK
+                assert reply.headers["Test-Request-Method"] == "GET"
 
     async def test_each_port_uses_its_own_deserializer(self):
         """Multiple TCP entries each use their own deserializer - not
@@ -105,61 +115,15 @@ class TestReplierTcp:
         async with Replier(callback=echo_request, tcp={port_one: deserializer_one, port_two: deserializer_two}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
 
-            reply_one = await (await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_one))).read_reply()
-            reply_two = await (await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_two))).read_reply()
+            async with await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_one)) as session_one, \
+                    await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_two)) as session_two:
+                reply_one = await session_one.read_reply()
+                reply_two = await session_two.read_reply()
 
-            assert reply_one is not None
-            assert reply_one.headers["Test-Request-X-Deserializer"] == "one"
-            assert reply_two is not None
-            assert reply_two.headers["Test-Request-X-Deserializer"] == "two"
-
-    async def test_leaves_the_connection_open_for_a_non_terminal_reply(self):
-        """A callback reply that isn't terminal (HTTP/1.1, no `Connection`
-        header) leaves the connection open after replying.
-
-        Checked by recording the actual `StreamWriter` `Replier` used and
-        asking it directly whether it's closing, rather than by watching
-        for an EOF on the client side - an abandoned-but-not-explicitly-
-        closed `StreamWriter` still gets closed by its own `__del__` once
-        nothing references it any more (which happens almost immediately
-        once `tcp_callback` returns, since nothing else holds onto it yet
-        - there's no connection pool keeping it alive here). `RecordingRadio`
-        holding a reference to it here prevents exactly that, so
-        `is_closing()` reflects only a deliberate `close()` call, not the
-        garbage collector's timing."""
-
-        class RecordingRadio(Radio):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.writer: StreamWriter | None = None
-
-            async def tcp_listen(self, callback, port=None):
-                async def recording_callback(reader, writer):
-                    self.writer = writer
-                    await callback(reader, writer)
-
-                return await super().tcp_listen(recording_callback, port)
-
-        radio = RecordingRadio.loopback()
-        port = await free_tcp_port(radio)
-
-        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
-            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
-            async with wait_closing(writer):
-                await HTTPRequest("GET", ROOT).write_to(writer)
-                reply = await HTTPResponse.read_from(reader)
-                assert reply is not None
-                assert reply.is_terminal() is False
-
-            assert radio.writer is not None
-            assert radio.writer.is_closing() is False
-
-            # The `Replier` chose not to close it - we still have to, so
-            # `Replier.__aexit__()`'s `server.wait_closed()` (which waits
-            # for every connection `asyncio.Server` still has open, not
-            # just the listening socket) doesn't hang on this one.
-            radio.writer.close()
-            await radio.writer.wait_closed()
+                assert reply_one is not None
+                assert reply_one.headers["Test-Request-X-Deserializer"] == "one"
+                assert reply_two is not None
+                assert reply_two.headers["Test-Request-X-Deserializer"] == "two"
 
     async def test_closes_the_connection_for_a_terminal_reply(self):
         """A callback reply with `Connection: close` closes the connection
@@ -223,6 +187,55 @@ class TestReplierTcp:
 
         assert data == b""
         assert called is False
+
+    async def test_replies_to_multiple_requests_on_the_same_connection(self):
+        """A non-terminal reply keeps the connection open for a further
+        request, which gets its own reply from `callback` in turn."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+            async with await prompter.prompt_tcp(HTTPRequest("GET", URI.parse("/one")), Endpoint(LOOPBACK, port)) as session:
+                first_reply = await session.read_reply()
+                assert first_reply is not None
+                assert first_reply.is_terminal() is False
+                assert first_reply.headers["Test-Request-Target"] == "/one"
+
+                await session.send(HTTPRequest("GET", URI.parse("/two")))
+                second_reply = await session.read_reply()
+                assert second_reply is not None
+                assert second_reply.headers["Test-Request-Target"] == "/two"
+
+    async def test_closes_an_idle_connection_after_the_timeout(self):
+        """A connection that's been replied to, but sends nothing
+        further, is closed once `tcp_idle_timeout` elapses."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio, tcp_idle_timeout=0.2):
+            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
+            async with wait_closing(writer):
+                await HTTPRequest("GET", ROOT).write_to(writer)
+                reply = await HTTPResponse.read_from(reader)
+                assert reply is not None
+                assert reply.is_terminal() is False
+
+                data = await asyncio.wait_for(reader.read(), timeout=1)
+                assert data == b""
+
+    async def test_closes_a_connection_that_never_sends_a_request(self):
+        """The idle timeout also covers the very first request - a
+        connection that sends nothing at all is closed too, not just a
+        reused one waiting on a second request."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio, tcp_idle_timeout=0.2):
+            reader, writer = await asyncio.open_connection(str(LOOPBACK), port)
+            async with wait_closing(writer):
+                data = await asyncio.wait_for(reader.read(), timeout=1)
+                assert data == b""
 
     async def test_records_its_own_server_for_closing_later(self):
         """The started `Server` is recorded on `tcp_servers`."""

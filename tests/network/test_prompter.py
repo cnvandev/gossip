@@ -57,12 +57,12 @@ class TestPrompterPromptTcp:
 
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
-            reply = await session.read_reply()
+            async with await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port)) as session:
+                reply = await session.read_reply()
 
-            assert reply is not None
-            assert reply.status == HTTPStatus.OK
-            assert reply.headers["Test-Request-Method"] == "GET"
+                assert reply is not None
+                assert reply.status == HTTPStatus.OK
+                assert reply.headers["Test-Request-Method"] == "GET"
 
     async def test_leaves_the_connection_open_for_a_non_terminal_reply(self):
         """A reply that isn't terminal (HTTP/1.1, no `Connection` header)
