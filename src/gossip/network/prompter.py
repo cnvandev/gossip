@@ -12,6 +12,7 @@ from aiostream import stream
 from gossip.network.endpoint import Endpoint
 from gossip.network.radio import Radio
 from gossip.network.serializer import Serializable
+from gossip.network.session import PromptSession
 
 log = logging.getLogger(__name__)
 
@@ -47,22 +48,19 @@ class Prompter[Reply: Serializable]:
         self.radio = radio or Radio.from_netifaces()
         self.deserializer = deserializer
 
-    async def prompt_tcp(self, prompt: Serializable, address: Endpoint) -> Reply | None:
-        """Sends a prompt message to the given address, awaiting the reply.
-
-        Asynchronously returns the reply, or `None` if the reply is not
-        acceptable by our deserializer.
+    async def prompt_tcp(self, prompt: Serializable, address: Endpoint) -> PromptSession[Reply]:
+        """Opens a TCP connection to `address`, sends `prompt`, and
+        returns the `PromptSession` wrapping that connection - its reply
+        not yet read (get it via `read_reply()`, or `async for`/
+        `anext()`), and ready for further prompts down the same
+        connection via `session.send()`.
         """
-        reader, writer = await self.radio.tcp_send(address)
+        reader, writer = await self.radio.tcp_connect(address)
         log.debug("Connected to TCP %s, sending prompt %r", address, prompt)
-        await prompt.write_to(writer)
+        session = PromptSession(address, reader, writer, self.deserializer)
+        await session.send(prompt)
         log.debug("Sent prompt to TCP %s", address)
-        reply = await self.deserializer(reader)
-        log.debug("Received reply %r from TCP %s", reply, address)
-        if reply is None or reply.is_terminal():
-            writer.close()
-            await writer.wait_closed()
-        return reply
+        return session
 
     async def prompt_udp(self, prompt: Serializable, remote_host: Endpoint, tcp_port: int | None = None) -> Reply | None:
         """Sends out a prompt via UDP to the given endpoint, then waits for a

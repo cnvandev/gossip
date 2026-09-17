@@ -18,7 +18,6 @@ from gossip.network.replier import Replier
 from ..support.asyncio import StaticReplyProtocol, wait_closing
 from ..support.http import echo_request
 from ..support.network import free_tcp_port
-from ..support.streams import RecordingWriter
 
 LOOPBACK = IPv4Address("127.0.0.1")
 MULTICAST_GROUP = IPv4Address("239.255.255.250")
@@ -47,18 +46,19 @@ class TestPrompterInit:
 
 
 class TestPrompterPromptTcp:
-    """`Prompter.prompt_tcp()` sends a prompt over a real TCP connection
-    and returns the deserialized reply."""
+    """`Prompter.prompt_tcp()` opens a real TCP connection, sends a
+    prompt, and returns the `PromptSession` wrapping it."""
 
     async def test_returns_the_deserialized_reply(self):
-        """The reply written back is read and deserialized, carrying
+        """The reply read from the session is deserialized, carrying
         back what the server actually received."""
         radio = Radio.loopback()
         port = await free_tcp_port(radio)
 
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            reply = await session.read_reply()
 
             assert reply is not None
             assert reply.status == HTTPStatus.OK
@@ -66,46 +66,29 @@ class TestPrompterPromptTcp:
 
     async def test_leaves_the_connection_open_for_a_non_terminal_reply(self):
         """A reply that isn't terminal (HTTP/1.1, no `Connection` header)
-        leaves the connection open once `prompt_tcp()` returns.
-
-        Checked by recording whether `prompt_tcp()` itself ever called
-        `close()`, rather than by watching the peer for an EOF - an
-        abandoned-but-not-explicitly-closed `StreamWriter` still gets
-        closed by its own `__del__` once nothing references it, and
-        *when* that happens is up to the garbage collector, not
-        `prompt_tcp()`. That makes EOF an unreliable signal here (see
-        `RecordingWriter`)."""
-
-        class RecordingRadio(Radio):
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
-                self.writer: RecordingWriter | None = None
-
-            async def tcp_send(self, remote):
-                reader, writer = await super().tcp_send(remote)
-                self.writer = RecordingWriter(writer)
-                return reader, self.writer
-
-        radio = RecordingRadio.loopback()
+        leaves the session's connection open once its reply has been
+        read."""
+        radio = Radio.loopback()
         port = await free_tcp_port(radio)
 
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            reply = await session.read_reply()
 
             assert reply is not None
             assert reply.is_terminal() is False
-            assert radio.writer is not None
-            assert radio.writer.closed is False
+            assert session.writer.is_closing() is False
 
-            # Our own code chose not to close it - we still have to, so
+            # The session chose not to close it - we still have to, so
             # the connection doesn't leak past this test.
-            radio.writer.close()
-            await radio.writer.wait_closed()
+            session.close()
+            await session.wait_closed()
 
     async def test_closes_the_connection_for_a_terminal_reply(self):
-        """A reply with `Connection: close` closes the connection once
-        `prompt_tcp()` returns - observed as EOF from the server side."""
+        """A reply with `Connection: close` closes the session's
+        connection once its reply has been read - observed as EOF from
+        the server side."""
         loop = asyncio.get_running_loop()
         connection = loop.create_future()
 
@@ -119,7 +102,8 @@ class TestPrompterPromptTcp:
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            reply = await session.read_reply()
             assert reply is not None
 
             server_reader, server_writer = await connection
@@ -148,7 +132,8 @@ class TestPrompterPromptTcp:
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            reply = await session.read_reply()
 
             assert reply is None
 

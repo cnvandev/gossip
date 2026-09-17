@@ -26,8 +26,8 @@ class Interface:
     name: str
     bindings: Mapping[int, tuple[Binding, ...]]
 
-    async def tcp_send(self, remote: Endpoint) -> tuple[StreamReader, StreamWriter]:
-        """Send a TCP message to the specified address/port."""
+    async def tcp_connect(self, remote: Endpoint) -> tuple[StreamReader, StreamWriter]:
+        """Open a TCP connection to the specified address/port."""
         return await asyncio.open_connection(str(remote.address), remote.port)
 
     async def tcp_listen(self, callback: Callable[[StreamReader, StreamWriter], Awaitable[None] | None], port: int | None = None) -> Server:

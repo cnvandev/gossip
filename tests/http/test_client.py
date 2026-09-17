@@ -5,16 +5,19 @@ from gossip.dns.client import DNSClient
 from gossip.dns.message import RecordType
 from gossip.http.client import HTTPClient
 from gossip.http.message import HTTPRequest, HTTPResponse
+from gossip.http.session import HTTPSession
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.prompter import Prompter
 from gossip.network.radio import Radio
 from gossip.network.replier import Replier
 
+from ..support.asyncio import wait_closing
 from ..support.http import echo_request
 from ..support.network import free_tcp_port
 
 LOOPBACK = IPv4Address("127.0.0.1")
+ROOT = URI.parse("/")
 
 
 class FakeDNSClient(DNSClient):
@@ -157,3 +160,159 @@ class TestHTTPClientVerbs:
                 assert response.status == HTTPStatus.OK
                 assert response.headers["Test-Request-Method"] == method_name.upper()
                 assert response.headers["Test-Request-Target"] == uri.path
+
+    async def test_forces_connection_close_regardless_of_headers(self):
+        """Each verb method sends `Connection: close`, even if the
+        caller passed their own `Connection` header."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+            response = await client.get(uri, {"Connection": "keep-alive"})
+
+            assert response is not None
+            assert response.headers["Test-Request-Connection"] == "close"
+
+
+class TestHTTPClientRequest:
+    """`HTTPClient.request()` opens an `HTTPSession`, sending `method`
+    as the session's own first request."""
+
+    async def test_returns_a_session_with_the_first_reply_readable(self):
+        """The reply to `request()`'s own first message is readable
+        straight off the returned session."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+
+            async with await client.request("GET", uri) as session:
+                assert isinstance(session, HTTPSession)
+                reply = await session.read_reply()
+
+                assert reply is not None
+                assert reply.status == HTTPStatus.OK
+                assert reply.headers["Test-Request-Method"] == "GET"
+
+    async def test_is_async_iterable_over_its_replies(self):
+        """`async for`/`anext()` on the session delegate to the
+        underlying `PromptSession`, same as `read_reply()`."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+
+            async with await client.request("GET", uri) as session:
+                reply = await anext(session, None)
+
+                assert reply is not None
+                assert reply.status == HTTPStatus.OK
+
+    async def test_defaults_to_connection_keep_alive(self):
+        """`Connection: keep-alive` is sent unless `headers` overrides
+        it."""
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+
+        async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+
+            async with await client.request("GET", uri) as session:
+                reply = await session.read_reply()
+                assert reply is not None
+                assert reply.headers["Test-Request-Connection"] == "keep-alive"
+
+    async def test_reuses_the_connection_for_a_second_request(self):
+        """A second request sent via the session's own verb methods goes
+        down the same TCP connection as the first - the server here only
+        ever accepts one connection, and reads two requests off it."""
+
+        async def on_connection(reader, writer):
+            for _ in range(2):
+                request = await HTTPRequest.read_from(reader)
+                assert request is not None
+                await HTTPResponse(HTTPStatus.OK, {"Test-Echo-Target": str(request.target)}).write_to(writer)
+            writer.close()
+            await writer.wait_closed()
+
+        radio = Radio.loopback()
+        server = await radio.tcp_listen(on_connection)
+        async with wait_closing(server):
+            _, port = server.sockets[0].getsockname()
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/one")
+
+            async with await client.request("GET", uri) as session:
+                first_reply = await session.read_reply()
+                assert first_reply is not None
+                assert first_reply.headers["Test-Echo-Target"] == "/one"
+
+                second_reply = await session.get(URI.parse("/two"))
+                assert second_reply is not None
+                assert second_reply.headers["Test-Echo-Target"] == "/two"
+
+    async def test_session_verb_methods_send_their_own_method(self):
+        """Each of the session's verb methods sends its own HTTP method,
+        down the same connection as the request that opened it."""
+
+        async def on_connection(reader, writer):
+            for _ in range(6):
+                request = await HTTPRequest.read_from(reader)
+                assert request is not None
+                await HTTPResponse(HTTPStatus.OK, {"Test-Echo-Method": request.method}).write_to(writer)
+            writer.close()
+            await writer.wait_closed()
+
+        radio = Radio.loopback()
+        server = await radio.tcp_listen(on_connection)
+        async with wait_closing(server):
+            _, port = server.sockets[0].getsockname()
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+
+            async with await client.request("GET", uri) as session:
+                first_reply = await session.read_reply()
+                assert first_reply is not None
+                assert first_reply.headers["Test-Echo-Method"] == "GET"
+
+                for method_name in ["post", "put", "patch", "delete", "head"]:
+                    reply = await getattr(session, method_name)(ROOT)
+                    assert reply is not None
+                    assert reply.headers["Test-Echo-Method"] == method_name.upper()
+
+    async def test_get_returns_none_for_an_unparseable_reply(self):
+        """A verb method returns `None` if its reply can't be parsed,
+        same as `request()`'s own first message does."""
+
+        async def on_connection(reader, writer):
+            first_request = await HTTPRequest.read_from(reader)
+            assert first_request is not None
+            await HTTPResponse(HTTPStatus.OK).write_to(writer)
+
+            second_request = await HTTPRequest.read_from(reader)
+            assert second_request is not None
+            writer.write(b"not a valid HTTP message\r\n\r\n")
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        radio = Radio.loopback()
+        server = await radio.tcp_listen(on_connection)
+        async with wait_closing(server):
+            _, port = server.sockets[0].getsockname()
+            client = HTTPClient(radio=radio)
+            uri = URI.http(f"//127.0.0.1:{port}/")
+
+            async with await client.request("GET", uri) as session:
+                first_reply = await session.read_reply()
+                assert first_reply is not None
+
+                second_reply = await session.get(ROOT)
+                assert second_reply is None

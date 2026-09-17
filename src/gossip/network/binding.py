@@ -36,8 +36,8 @@ class Binding:
         """Yes, this is just so we can call `binding.address`"""
         return self.addr
 
-    async def tcp_send(self, remote: Endpoint, local_port: int = 0) -> tuple[StreamReader, StreamWriter]:
-        """Send a TCP message to the specified address/port."""
+    async def tcp_connect(self, remote: Endpoint, local_port: int = 0) -> tuple[StreamReader, StreamWriter]:
+        """Open a TCP connection to the specified address/port."""
         return await asyncio.open_connection(
             str(remote.address),
             remote.port,

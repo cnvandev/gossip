@@ -29,11 +29,11 @@ class TestRadioAddresses:
 
 
 class TestRadioTcp:
-    """`Radio.tcp_listen()`/`Radio.tcp_send()` round-trip real bytes over
+    """`Radio.tcp_listen()`/`Radio.tcp_connect()` round-trip real bytes over
     loopback."""
 
     async def test_round_trips_bytes(self):
-        """A client connected via `tcp_send()` delivers its bytes to
+        """A client connected via `tcp_connect()` delivers its bytes to
         whatever's listening via `tcp_listen()`."""
         radio = Radio((Interface("lo0", {AF_INET: (Binding(LOOPBACK),)}),))
         received = asyncio.get_running_loop().create_future()
@@ -45,7 +45,7 @@ class TestRadioTcp:
         server = await radio.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
-            _, writer = await radio.tcp_send(Endpoint(LOOPBACK, port))
+            _, writer = await radio.tcp_connect(Endpoint(LOOPBACK, port))
             async with wait_closing(writer):
                 writer.write(b"hello")
                 writer.write_eof()
@@ -214,7 +214,7 @@ class TestRadioLoopback:
         server = await radio.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
-            _, writer = await radio.tcp_send(Endpoint(LOOPBACK, port))
+            _, writer = await radio.tcp_connect(Endpoint(LOOPBACK, port))
             async with wait_closing(writer):
                 writer.write(b"hello")
                 writer.write_eof()

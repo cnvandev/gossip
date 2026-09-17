@@ -43,8 +43,8 @@ class Radio:
         else:
             return await asyncio.start_server(callback, addresses, port=port)
 
-    async def tcp_send(self, remote: Endpoint) -> tuple[StreamReader, StreamWriter]:
-        """Send a TCP message to the specified address/port."""
+    async def tcp_connect(self, remote: Endpoint) -> tuple[StreamReader, StreamWriter]:
+        """Open a TCP connection to the specified address/port."""
         return await asyncio.open_connection(str(remote.address), remote.port)
 
     async def udp_listen(self, callback: Callable[[bytes, IPv4Address | IPv6Address | None, Endpoint, DatagramTransport], Coroutine[Any, Any, None]], port: int = 0, group_address: IPv4Address | IPv6Address | None = None) -> list[tuple[DatagramTransport, DatagramCallbackProtocol]]:

@@ -149,11 +149,13 @@ class TestExtendedHTTPClientRequestTcp:
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             client = ExtendedHTTPClient(radio=radio)
             uri = URI.http(f"//127.0.0.1:{port}/")
-            response = await client.request_tcp("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}})
 
-            assert response is not None
-            assert response.status == HTTPStatus.OK
-            assert response.headers["Test-Request-Method"] == "M-GET"
+            async with await client.request_tcp("get", uri, extended_headers={Strength.MANDATORY: {extension: {}}}) as session:
+                response = await session.read_reply()
+
+                assert response is not None
+                assert response.status == HTTPStatus.OK
+                assert response.headers["Test-Request-Method"] == "M-GET"
             assert response.headers["Test-Request-Man"] == "my-ext"
 
 

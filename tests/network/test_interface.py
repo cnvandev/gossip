@@ -34,11 +34,11 @@ class TestInterfaceAddresses:
 
 
 class TestInterfaceTcp:
-    """`Interface.tcp_listen()`/`Interface.tcp_send()` round-trip real
+    """`Interface.tcp_listen()`/`Interface.tcp_connect()` round-trip real
     bytes over loopback, on whichever addresses the interface is bound to."""
 
     async def test_round_trips_bytes(self):
-        """A client connected via `tcp_send()` delivers its bytes to
+        """A client connected via `tcp_connect()` delivers its bytes to
         whatever's listening via `tcp_listen()`."""
         interface = Interface("lo0", {AF_INET: (Binding(LOOPBACK),)})
         received = asyncio.get_running_loop().create_future()
@@ -50,7 +50,7 @@ class TestInterfaceTcp:
         server = await interface.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
-            _, writer = await interface.tcp_send(Endpoint(LOOPBACK, port))
+            _, writer = await interface.tcp_connect(Endpoint(LOOPBACK, port))
             async with wait_closing(writer):
                 writer.write(b"hello")
                 writer.write_eof()

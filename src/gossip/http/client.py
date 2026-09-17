@@ -1,10 +1,12 @@
 import logging
 from collections.abc import Mapping
+from http import HTTPMethod
 from ipaddress import ip_address
 
 # from gossip.dns.client import resolve_ip
 from gossip.dns.client import DNSClient
 from gossip.http.message import HTTPRequest, HTTPResponse
+from gossip.http.session import HTTPSession
 from gossip.internet.product import ProductStack
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
@@ -63,24 +65,45 @@ class HTTPClient:
 
         return HTTPRequest(method, request_uri, headers), destination
 
-    async def request(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
+    async def request(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPSession:
+        """Opens an `HTTPSession` to `uri`'s host, sends `method` as the
+        first request, and returns the session - its reply not yet read
+        (`session.read_reply()`, or `async for session`/`anext(session)`),
+        ready for further requests to the same host via
+        `session.get()`/`.post()`/etc.
+
+        `Connection: keep-alive` is added unless `headers` sets
+        `Connection` itself.
+        """
+        headers = {"Connection": "keep-alive"} | dict(headers or {})
         request, destination = await self.prepare(method, uri, headers)
-        return await self.prompter.prompt_tcp(request, destination)
+        session = await self.prompter.prompt_tcp(request, destination)
+        return HTTPSession(session, str(uri.netloc), self.default_headers())
+
+    async def request_once(self, method: str, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
+        """Send a single request, forcing `Connection: close` so the
+        connection doesn't outlive this call, and return its one reply.
+
+        This is mostly just a convenience method for the other request methods.
+        """
+        headers = dict(headers or {}) | {"Connection": "close"}
+        async with await self.request(method, uri, headers) as session:
+            return await session.read_reply()
 
     async def get(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("GET", uri, headers)
+        return await self.request_once(HTTPMethod.GET, uri, headers)
 
     async def post(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("POST", uri, headers)
+        return await self.request_once(HTTPMethod.POST, uri, headers)
 
     async def put(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("PUT", uri, headers)
+        return await self.request_once(HTTPMethod.PUT, uri, headers)
 
     async def patch(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("PATCH", uri, headers)
+        return await self.request_once(HTTPMethod.PATCH, uri, headers)
 
     async def delete(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("DELETE", uri, headers)
+        return await self.request_once(HTTPMethod.DELETE, uri, headers)
 
     async def head(self, uri: URI, headers: Mapping[str, str] | None = None) -> HTTPResponse | None:
-        return await self.request("HEAD", uri, headers)
+        return await self.request_once(HTTPMethod.HEAD, uri, headers)

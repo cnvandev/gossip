@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from asyncio.streams import StreamWriter
 from http import HTTPStatus
 from ipaddress import IPv4Address
 
@@ -19,7 +20,6 @@ from gossip.network.replier import Replier
 from ..support.asyncio import wait_closing
 from ..support.http import echo_request
 from ..support.network import await_reply, free_tcp_port, free_udp_port, real_interface_address
-from ..support.streams import RecordingWriter
 
 LOOPBACK = IPv4Address("127.0.0.1")
 ROOT = URI.parse("/")
@@ -75,7 +75,8 @@ class TestReplierTcp:
 
         async with Replier(callback=echo_request, tcp={port: HTTPRequest.read_from}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
-            reply = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            session = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port))
+            reply = await session.read_reply()
 
             assert reply is not None
             assert reply.status == HTTPStatus.OK
@@ -104,8 +105,8 @@ class TestReplierTcp:
         async with Replier(callback=echo_request, tcp={port_one: deserializer_one, port_two: deserializer_two}, radio=radio):
             prompter = Prompter(HTTPResponse.read_from, radio=radio)
 
-            reply_one = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_one))
-            reply_two = await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_two))
+            reply_one = await (await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_one))).read_reply()
+            reply_two = await (await prompter.prompt_tcp(HTTPRequest("GET", ROOT), Endpoint(LOOPBACK, port_two))).read_reply()
 
             assert reply_one is not None
             assert reply_one.headers["Test-Request-X-Deserializer"] == "one"
@@ -116,26 +117,26 @@ class TestReplierTcp:
         """A callback reply that isn't terminal (HTTP/1.1, no `Connection`
         header) leaves the connection open after replying.
 
-        Checked by recording whether the `Replier` itself ever called
-        `close()` on the connection, rather than by watching for an EOF
-        on the client side - an abandoned-but-not-explicitly-closed
-        `StreamWriter` still gets closed by its own `__del__` once
+        Checked by recording the actual `StreamWriter` `Replier` used and
+        asking it directly whether it's closing, rather than by watching
+        for an EOF on the client side - an abandoned-but-not-explicitly-
+        closed `StreamWriter` still gets closed by its own `__del__` once
         nothing references it any more (which happens almost immediately
-        once `tcp_callback` returns, since nothing else holds onto it
-        yet - there's no connection pool keeping it alive here). *When*
-        exactly that happens is up to the garbage collector, not this
-        code, which makes EOF an unreliable signal (see
-        `RecordingWriter`)."""
+        once `tcp_callback` returns, since nothing else holds onto it yet
+        - there's no connection pool keeping it alive here). `RecordingRadio`
+        holding a reference to it here prevents exactly that, so
+        `is_closing()` reflects only a deliberate `close()` call, not the
+        garbage collector's timing."""
 
         class RecordingRadio(Radio):
             def __init__(self, *args, **kwargs):
                 super().__init__(*args, **kwargs)
-                self.writer: RecordingWriter | None = None
+                self.writer: StreamWriter | None = None
 
             async def tcp_listen(self, callback, port=None):
                 async def recording_callback(reader, writer):
-                    self.writer = RecordingWriter(writer)
-                    await callback(reader, self.writer)
+                    self.writer = writer
+                    await callback(reader, writer)
 
                 return await super().tcp_listen(recording_callback, port)
 
@@ -151,7 +152,7 @@ class TestReplierTcp:
                 assert reply.is_terminal() is False
 
             assert radio.writer is not None
-            assert radio.writer.closed is False
+            assert radio.writer.is_closing() is False
 
             # The `Replier` chose not to close it - we still have to, so
             # `Replier.__aexit__()`'s `server.wait_closed()` (which waits

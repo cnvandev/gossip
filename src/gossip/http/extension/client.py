@@ -9,6 +9,7 @@ from gossip.http.client import HTTPClient
 from gossip.http.extension.constants import Scope, Strength
 from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPResponse
+from gossip.http.session import HTTPSession
 from gossip.internet.uri import URI
 
 
@@ -76,8 +77,9 @@ class ExtendedHTTPClient(HTTPClient):
     async def request_tcp(self,
         method: str, uri: URI, headers: Mapping[str, str] | None = None,
         extended_headers: Mapping[Strength, Mapping[Extension, Mapping[str, str]]] | None = None,
-    ) -> HTTPResponse | None:
-        """Make an extended HTTP request, with the extended headers."""
+    ) -> HTTPSession:
+        """Make an extended HTTP request, with the extended headers,
+        returning the session it opened."""
         method, headers = self.extend(method, headers, extended_headers)
         return await super().request(method, uri, headers)
 

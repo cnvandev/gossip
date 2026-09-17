@@ -61,12 +61,12 @@ class TestBindingFromIfaddresses:
 
 
 class TestBindingTcp:
-    """`Binding.tcp_listen()`/`Binding.tcp_send()` round-trip real bytes
+    """`Binding.tcp_listen()`/`Binding.tcp_connect()` round-trip real bytes
     over a real TCP socket on loopback, bound to this `Binding`'s own
     address."""
 
     async def test_round_trips_bytes_from_the_bindings_own_address(self):
-        """A client connected via `tcp_send()` delivers its bytes to
+        """A client connected via `tcp_connect()` delivers its bytes to
         whatever's listening via `tcp_listen()`, from the binding's address."""
         binding = Binding(LOOPBACK)
         received = asyncio.get_running_loop().create_future()
@@ -78,7 +78,7 @@ class TestBindingTcp:
         server = await binding.tcp_listen(on_connection)
         async with wait_closing(server):
             _, port = server.sockets[0].getsockname()
-            _, writer = await binding.tcp_send(Endpoint(LOOPBACK, port))
+            _, writer = await binding.tcp_connect(Endpoint(LOOPBACK, port))
             async with wait_closing(writer):
                 host, _ = writer.get_extra_info("sockname")
                 assert host == str(LOOPBACK)

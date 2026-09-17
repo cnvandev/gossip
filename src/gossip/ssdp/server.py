@@ -75,8 +75,8 @@ class SSDPServer(HTTPServer):
         if port_constraint := request.headers.get(str(TCP_PORT), None):
             log.debug("Writing to TCP port %s", port_constraint)
             destination = Endpoint(remote.address, int(port_constraint[0]))
-            coroutines = (self.prompter.prompt_tcp(response, destination) for response in responses)
-            await asyncio.gather(*coroutines)
+            sessions = await asyncio.gather(*(self.prompter.prompt_tcp(response, destination) for response in responses))
+            await asyncio.gather(*(session.read_reply() for session in sessions))
             return ()
         else:
             return responses
