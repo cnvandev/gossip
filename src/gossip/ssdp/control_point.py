@@ -34,7 +34,7 @@ class SSDPControlPoint:
         if device_uuid is None:
             device_uuid = UUID(int=uuid.getnode())
         self.uuid = device_uuid
-        self.devices = dict()
+        self.devices = {}
 
         self.client = SSDPClient(agent=agent, radio=radio)
         self.replier = Replier(callback=self.respond, udp={SSDP_HOST: HTTPRequest.read_from}, radio=radio)

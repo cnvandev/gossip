@@ -9,6 +9,7 @@ from gossip.http.server import HTTPServer
 from gossip.internet.uri import URI
 from gossip.network.endpoint import Endpoint
 from gossip.network.prompter import Prompter
+from gossip.network.radio import Radio
 from gossip.network.replier import Replier
 from gossip.network.serializer import Serializable
 from gossip.ssdp.headers import SEARCH_PORT, TCP_PORT
@@ -38,6 +39,7 @@ class SSDPServer(HTTPServer):
         replier: Replier[HTTPRequest] | None = None,
         responder: SSDPResponder | None = None,
         udp_port: int = SSDP_HOST.port,
+        radio: Radio | None = None,
     ):
         if not replier:
             udp_ports = {
@@ -48,7 +50,7 @@ class SSDPServer(HTTPServer):
             tcp_ports = {
                 udp_port: HTTPRequest.read_from,
             }
-            replier = Replier(callback=self.respond, udp=udp_ports, tcp=tcp_ports)
+            replier = Replier(callback=self.respond, udp=udp_ports, tcp=tcp_ports, radio=radio)
 
         if not responder:
             # If we're given a UDP port, include it in the static headers.

@@ -14,10 +14,13 @@ import netifaces
 from netifaces import AF_INET
 
 from gossip.asyncio.protocol.reply import DatagramReplyProtocol
+from gossip.http.message import HTTPRequest
 from gossip.network.endpoint import Endpoint
 from gossip.network.radio import Radio
 
-from .asyncio import wait_closing
+from .asyncio import MessageCollector, wait_closing
+
+LOOPBACK = IPv4Address("127.0.0.1")
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,34 @@ async def free_udp_port(radio: Radio) -> int:
     _, port = probe.get_extra_info("sockname")
     probe.close()
     return port
+
+
+async def collect_notifications(expected: int, port: int) -> list[HTTPRequest]:
+    """Listens on loopback at `port` for `expected` datagrams sent via
+    `Radio.loopback()` - whose default, broadcast-less binding sends
+    straight to its own address rather than a real multicast group -
+    returning them deserialized once they've all arrived."""
+    loop = asyncio.get_running_loop()
+    transport, protocol = await loop.create_datagram_endpoint(
+        lambda: MessageCollector(HTTPRequest.read_from, expected), local_addr=(str(LOOPBACK), port), reuse_port=True,
+    )
+    try:
+        await asyncio.wait_for(protocol.done, timeout=2)
+        return protocol.messages
+    finally:
+        transport.close()
+
+
+class NotifyRecorder:
+    """A `Replier` callback that records every request it's given, in
+    order, and never sends back a reply of its own."""
+
+    def __init__(self):
+        self.received: list[HTTPRequest] = []
+
+    async def __call__(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> tuple[()]:
+        self.received.append(request)
+        return ()
 
 
 def real_interface_address() -> IPv4Address | None:
