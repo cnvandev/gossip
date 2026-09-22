@@ -1,8 +1,9 @@
 import asyncio
+import functools
 import logging
 from collections.abc import Iterable, Mapping
+from types import TracebackType
 
-from gossip.http.extension.framework import Extension
 from gossip.http.message import HTTPRequest, HTTPResponse
 from gossip.http.resource import ResourceCollection
 from gossip.http.server import HTTPServer
@@ -12,6 +13,7 @@ from gossip.network.prompter import Prompter
 from gossip.network.radio import Radio
 from gossip.network.replier import Replier
 from gossip.network.serializer import Serializable
+from gossip.ssdp.extension import DISCOVER
 from gossip.ssdp.headers import SEARCH_PORT, TCP_PORT
 from gossip.ssdp.responder import SSDPResponder
 from gossip.ssdp.uri import SSDP_HOST
@@ -20,22 +22,22 @@ log = logging.getLogger(__name__)
 
 
 class SSDPServer(HTTPServer):
-    """Listens for requests via the Simple Service Discovery Protocol (SSDP) on
-    behalf of an underlying resource (typically a device or service).
+    """A device that can be interacted with over SSDP.
 
-    The main difference between it and a typical `HTTPServer` is that it listens
-    for SSDP requests on a specific UDP port, and has the ability to send
-    out-of-band search responses over TCP. It also defaults to instantiating
-    an `ExtendedHTTPResponder`.
+    Serves `upnp_device`'s description over unicast HTTP and responds to
+    `M-SEARCH`es like any `HTTPServer`, but also listens on the SSDP
+    multicast address, can send out-of-band search responses over TCP, and
+    announces itself with `NOTIFY` requests on entering/exiting as an async
+    context manager.
     """
 
-    """A prompter to send out-of-band responses over TCP, if needed."""
+    """A prompter to send out-of-band responses over TCP, and `NOTIFY`
+    announcements over multicast."""
     prompter: Prompter[HTTPResponse]
 
     def __init__(
         self,
         resources: Mapping[URI, ResourceCollection],
-        extensions: Iterable[Extension],
         replier: Replier[HTTPRequest] | None = None,
         responder: SSDPResponder | None = None,
         udp_port: int = SSDP_HOST.port,
@@ -63,11 +65,49 @@ class SSDPServer(HTTPServer):
             # default HTTP accessor to handle requests (and don't pass it in).
             responder = SSDPResponder(
                 resources,
-                extensions,
+                (DISCOVER,),
                 static_headers=static_headers,
             )
 
         super().__init__(resources, replier, responder)
+        self.prompter = Prompter(HTTPResponse.read_from, radio=radio)
+
+    def notification_request(self, headers: Mapping[str, str], local: Endpoint) -> HTTPRequest:
+        """Builds one interface's `NOTIFY` request, `Location` pointing at our device description via `local`'s own address."""
+        base = URI.parse(f"http://{local}")
+        notify_headers = dict(headers) | {
+            "Location": str(base.join(str(headers["Location"]))),
+        }
+        return HTTPRequest("NOTIFY", URI.parse("*"), notify_headers)
+
+    async def notify(self, subtype: URI) -> None:
+        """Sends notification requests for the resources we're serving.
+
+        Await this to send every notification and wait for them all to land,
+        raising if any of them fail. For a fire-and-forget send instead,
+        schedule it as a task (e.g. `asyncio.create_task(...)`) rather than
+        awaiting it directly.
+        """
+        notifications = (
+            {
+                "Host": str(SSDP_HOST),
+                "NT": subresource_path,
+                "NTS": str(subtype),
+                "Location": uri,
+                "Cache-Control": "max-age=1800",
+                **subresource_headers,
+            }
+            for uri, resource in self.resources.items()
+            for subresource_path, subresource_headers in resource.items()
+        )
+        # `broadcast()` sends on every interface before it ever returns, so
+        # awaiting these is enough to know the notifications actually went
+        # out. Its own returned future instead tracks a *reply* - `NOTIFY`
+        # never gets one, so awaiting that too would hang forever.
+        await asyncio.gather(*(
+            self.prompter.broadcast(functools.partial(self.notification_request, notification), SSDP_HOST)
+            for notification in notifications
+        ))
 
     async def respond(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> Iterable[Serializable]:
         responses = await self.responder.respond(request, remote, local)
@@ -82,3 +122,24 @@ class SSDPServer(HTTPServer):
             return ()
         else:
             return responses
+
+    async def __aenter__(self):
+        await super().__aenter__()
+
+        # Send our waking-up notifications, and wait for them to actually
+        # land - we want to fail fast at startup if we can't reach the
+        # network on every interface we're configured to use.
+        await self.notify(URI.ssdp("alive"))
+        return self
+
+    async def __aexit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None):
+        # Send our powering-down notifications - a flaky interface shouldn't
+        # crash us on the way out, so we'll just log it instead.
+        try:
+            await self.notify(URI.ssdp("byebye"))
+        except Exception:
+            log.warning("Failed to send byebye notification.", exc_info=True)
+        finally:
+            # Always tear the server down too, even if the byebye notification
+            # didn't go out - otherwise its sockets outlive this block.
+            await super().__aexit__(exc_type, exc_val, exc_tb)

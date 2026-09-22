@@ -14,15 +14,15 @@ class URI(ParseResult):
     def covers(self, other: tuple[str, ...]) -> bool:
         """True if `self` matches every request that `other` would.
 
-        The base case is exact equality - every URI covers itself and
-        nothing else. A subclass may recognize additional patterns of its
-        own (e.g. SSDP's `ssdp:all` wildcard target), which is what makes
-        this the single relation the comparison operators below are built
-        from, rather than plain equality itself.
+        The base case is exact equality, with one wildcard: a bare `URI`
+        (no scheme) whose `path` is exactly `*` covers every URI,
+        regardless of scheme, domain, or `other`'s own path.
+
+        A subclass may recognize additional patterns of its own.
         """
         if not isinstance(other, URI):
             other = self.__class__(*other)
-        return self == other
+        return (self == other) or (self.path == "*" and not self.scheme)
 
     @override
     def __le__(self, other: tuple[str, ...]) -> bool:

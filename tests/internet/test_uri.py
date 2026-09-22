@@ -110,7 +110,10 @@ class TestURIFactories:
 
 class TestURICovers:
     """`URI.covers()` and the comparison operators built on it: the base
-    case is exact equality, so a plain `URI` covers only itself. A
+    case is exact equality, so a plain `URI` covers only itself - except a
+    bare `URI` (no scheme) whose `path` is exactly `*`, which covers every
+    URI regardless of scheme or domain. A scheme-qualified `*` (e.g.
+    `http:*`) doesn't get this treatment - it's back to exact equality. A
     subclass (e.g. `SSDPTarget`) can override `covers()` to recognize
     additional patterns of its own, without needing to redefine `<=`,
     `>=`, `<`, or `>` - they all dispatch through `covers()`."""
@@ -122,6 +125,25 @@ class TestURICovers:
     def test_a_different_uri_is_not_covered(self):
         """A URI doesn't cover a different one."""
         assert not URI.parse("http://example.com/x").covers(URI.parse("http://example.com/y"))
+
+    def test_a_bare_star_path_covers_any_path_domain_and_scheme(self):
+        """A schemeless `URI` whose `path` is `*` covers a completely
+        unrelated URI - different scheme, different domain, different
+        path."""
+        assert URI.parse("*").covers(URI.parse("https://example.com/x"))
+
+    def test_a_scheme_qualified_star_path_only_covers_an_equal_uri(self):
+        """A scheme on the `*` URI itself (e.g. `http:*`) disables the
+        wildcard entirely - it doesn't even cover another URI of that same
+        scheme, only itself."""
+        assert not URI.parse("http:*").covers(URI.parse("http://example.com/x"))
+        assert not URI.parse("http:*").covers(URI.parse("ftp://example.com/x"))
+        assert URI.parse("http:*").covers(URI.parse("http:*"))
+
+    def test_a_non_star_path_does_not_cover_a_different_uri(self):
+        """Only an exact `*` path triggers the wildcard - a URI whose path
+        merely contains a `*`, or ends with one, still only covers itself."""
+        assert not URI.parse("/x*").covers(URI.parse("/y"))
 
     def test_covers_accepts_plain_tuples_not_just_uri(self):
         """A plain `ParseResult`-shaped tuple works as the argument to
@@ -170,3 +192,24 @@ class TestURICovers:
         b = URI.parse("http://example.com/y")
         assert not (a < b)
         assert not (a > b)
+
+    def test_le_and_ge_reflect_wildcard_coverage(self):
+        """A wildcard is `>=` any URI it covers, and that URI is `<=` the
+        wildcard - but not the other way around, since coverage here only
+        goes one direction."""
+        star = URI.parse("*")
+        other = URI.parse("http://example.com/x")
+        assert star >= other
+        assert other <= star
+        assert not (other >= star)
+        assert not (star <= other)
+
+    def test_lt_and_gt_reflect_wildcard_coverage(self):
+        """A specific URI is strictly `<` a wildcard that covers it, and
+        the wildcard is strictly `>` it, since coverage only goes one way."""
+        star = URI.parse("*")
+        other = URI.parse("http://example.com/x")
+        assert other < star
+        assert star > other
+        assert not (star < other)
+        assert not (other > star)

@@ -2,6 +2,7 @@ import logging
 from collections import Counter
 from collections.abc import Mapping
 from ipaddress import IPv4Address, IPv6Address
+from typing import Self
 
 from gossip.http.accessor import HTTPAccessor
 from gossip.http.message import HTTPRequest
@@ -46,6 +47,13 @@ class HTTPServer:
         domains = Counter(uri.netloc or "*" for uri in resources)
         ip_addresses = Counter(self.replier.radio.addresses())
         self.summary = {**domains, **{str(ip): count for ip, count in ip_addresses.items()}}
+
+    @classmethod
+    def server_for(cls, resource: ResourceCollection, path: str = "/", **kwargs) -> Self:
+        """Builds a server for a single `resource` at `path`, wrapping it
+        in the `{path: resource}` mapping `__init__` expects - any other
+        keyword args are forwarded straight through."""
+        return cls({URI.parse(path): resource}, **kwargs)
 
     async def __aenter__(self):
         await self.replier.__aenter__()

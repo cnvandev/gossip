@@ -5,7 +5,7 @@ import uuid
 from uuid import UUID
 
 from gossip.internet.uri import URI
-from gossip.ssdp.device import SSDPDevice
+from gossip.ssdp.server import SSDPServer
 from gossip.ssdp.uri import MULTISCREEN_DOMAIN, SSDPTarget
 from gossip.upnp.model.descriptor import Device, Service
 from gossip.upnp.resource import UPnPDevice
@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 
 async def listen(device: Device):
-    async with SSDPDevice(UPnPDevice(device)):
+    async with SSDPServer.server_for(UPnPDevice(device), path="/device.xml"):
         await asyncio.sleep(3600)
 
 
