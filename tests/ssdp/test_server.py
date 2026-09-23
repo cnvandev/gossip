@@ -1,4 +1,5 @@
 import asyncio
+from http import HTTPMethod, HTTPStatus
 from ipaddress import IPv4Address
 
 import pytest
@@ -11,14 +12,20 @@ from gossip.network.endpoint import Endpoint
 from gossip.network.interface import Interface
 from gossip.network.radio import Radio
 from gossip.network.replier import Replier
+from gossip.ssdp.headers import SEARCH_PORT, TCP_PORT
+from gossip.ssdp.responder import SSDPResponder
 from gossip.ssdp.server import SSDPServer
 from gossip.ssdp.uri import SSDP_HOST
 from gossip.upnp.resource import UPnPDevice
 
-from ..support.network import NotifyRecorder, collect_notifications, real_interface_address
+from ..support.http import echo_request
+from ..support.network import NotifyRecorder, collect_notifications, free_tcp_port, real_interface_address
+from ..support.resources import InMemoryResource
 from ..upnp.descriptor import DummyDevice
 
 LOOPBACK = IPv4Address("127.0.0.1")
+REMOTE = Endpoint(IPv4Address("10.0.0.1"), 54321)
+LOCAL = Endpoint(IPv4Address("10.0.0.2"), SSDP_HOST.port)
 
 
 class TestSSDPServerInit:
@@ -51,6 +58,55 @@ class TestSSDPServerInit:
         assert isinstance(server.prompter.radio, Radio)
 
 
+class TestSSDPServerInitDefaults:
+    """Building an `SSDPServer` without an explicit `replier`/`responder`
+    wires up the multicast + unicast SSDP listeners and an
+    `SSDPResponder` for `resources`."""
+
+    def test_replier_listens_for_multicast_and_unicast_udp_on_the_ssdp_port_by_default(self):
+        """With no `udp_port` given, both the multicast group and a plain
+        unicast UDP/TCP listen use the default SSDP port."""
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), radio=Radio.loopback())
+        assert SSDP_HOST in server.replier.udp
+        assert SSDP_HOST.port in server.replier.udp
+        assert SSDP_HOST.port in server.replier.tcp
+
+    def test_replier_also_listens_on_a_given_udp_port(self):
+        """A custom `udp_port` is used for the unicast UDP/TCP listeners,
+        alongside the (fixed) multicast group listen."""
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), udp_port=12345, radio=Radio.loopback())
+        assert SSDP_HOST in server.replier.udp
+        assert 12345 in server.replier.udp
+        assert 12345 in server.replier.tcp
+
+    def test_stores_a_given_replier_instead_of_building_one(self):
+        """A given `replier` is used as-is, not rebuilt."""
+        radio = Radio.loopback()
+        replier = Replier(callback=echo_request, udp={0: HTTPRequest.read_from}, radio=radio)
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), replier=replier, radio=radio)
+        assert server.replier is replier
+
+    def test_defaults_to_an_ssdp_responder_with_no_search_port_header_on_the_default_port(self):
+        """Using the default SSDP port adds no `SEARCHPORT.UPNP.ORG`
+        static header - there's nothing non-standard to advertise."""
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), radio=Radio.loopback())
+        assert isinstance(server.responder, SSDPResponder)
+        assert str(SEARCH_PORT) not in server.responder.static_headers
+
+    def test_a_custom_udp_port_is_advertised_via_the_search_port_header(self):
+        """A non-default `udp_port` is advertised via the
+        `SEARCHPORT.UPNP.ORG` static header, so unicast searchers know
+        where else to reach it."""
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), udp_port=12345, radio=Radio.loopback())
+        assert server.responder.static_headers[str(SEARCH_PORT)] == "12345"
+
+    def test_stores_a_given_responder_instead_of_building_one(self):
+        """A given `responder` is used as-is, not rebuilt."""
+        responder = SSDPResponder({URI.parse("/thing"): InMemoryResource()})
+        server = SSDPServer.server_for(UPnPDevice(DummyDevice()), responder=responder, radio=Radio.loopback())
+        assert server.responder is responder
+
+
 class TestSSDPServerNotificationRequest:
     """`SSDPServer.notification_request()` builds the `NOTIFY` request sent
     out on one interface - a pure function of the given headers and that
@@ -65,7 +121,7 @@ class TestSSDPServerNotificationRequest:
         """The request method is always `NOTIFY`, and its target is `*`
         per the SSDP `NOTIFY` spec, not the device's own served path."""
         server = SSDPServer.server_for(UPnPDevice(DummyDevice()))
-        request = server.notification_request({"Location": URI.parse("/device.xml")}, Endpoint(LOOPBACK, 1900))
+        request = server.notification_request({"Location": "/device.xml"}, Endpoint(LOOPBACK, 1900))
         assert request.method == "NOTIFY"
         assert str(request.target) == "*"
 
@@ -73,7 +129,7 @@ class TestSSDPServerNotificationRequest:
         """Every given header is kept on the built request."""
         server = SSDPServer.server_for(UPnPDevice(DummyDevice()))
         request = server.notification_request(
-            {"NT": "upnp:rootdevice", "NTS": "ssdp:alive", "Location": URI.parse("/device.xml")},
+            {"NT": "upnp:rootdevice", "NTS": "ssdp:alive", "Location": "/device.xml"},
             Endpoint(LOOPBACK, 1900),
         )
         assert request.headers["NT"] == "upnp:rootdevice"
@@ -84,7 +140,7 @@ class TestSSDPServerNotificationRequest:
         with the given `Location` path - not `local` alone, and not the
         path alone."""
         server = SSDPServer.server_for(UPnPDevice(DummyDevice()))
-        request = server.notification_request({"Location": URI.parse("/custom.xml")}, Endpoint(IPv4Address("10.0.0.5"), 1900))
+        request = server.notification_request({"Location": "/custom.xml"}, Endpoint(IPv4Address("10.0.0.5"), 1900))
         assert request.headers["Location"] == "http://10.0.0.5:1900/custom.xml"
 
 
@@ -243,6 +299,55 @@ class TestSSDPServerContextManager:
 
         # `__aexit__()` hits the exact same failure, but swallows it.
         await server.__aexit__(None, None, None)
+
+
+class TestSSDPServerRespond:
+    """`SSDPServer.respond()` delegates to its own `responder`, and
+    redirects the response out-of-band over TCP instead when the request
+    carries a `TCPPORT.UPNP.ORG` header."""
+
+    async def test_returns_the_responders_replies_with_no_tcp_port_header(self):
+        """No `TCPPORT.UPNP.ORG` header: the responder's own replies are
+        returned directly, unchanged."""
+        server = SSDPServer.server_for(InMemoryResource(b"hi", {"Content-Type": "text/plain"}), path="/thing", radio=Radio.loopback())
+        request = HTTPRequest(HTTPMethod.GET, URI.parse("/thing"))
+
+        (response,) = await server.respond(request, REMOTE, LOCAL)
+
+        assert response.status == HTTPStatus.OK
+        assert response.body is not None
+        assert await response.body.read() == b"hi"
+
+    async def test_a_tcp_port_header_sends_out_of_band_and_returns_nothing(self):
+        """A `TCPPORT.UPNP.ORG` header sends the response out-of-band, as
+        a real TCP connection to that port, instead of returning it
+        directly.
+
+        The callback here never reads the incoming prompt's own body -
+        the `Replier`'s dispatch loop doesn't either, it only parses
+        headers before calling back - so this doesn't depend on the
+        response's body at all, only on our own reply's
+        `Connection: close` closing the connection once we're done with
+        it.
+        """
+        radio = Radio.loopback()
+        port = await free_tcp_port(radio)
+        received: list[HTTPResponse] = []
+
+        async def capture_response(response: HTTPResponse, remote: Endpoint, local: Endpoint) -> tuple[HTTPResponse]:
+            received.append(response)
+            return (HTTPResponse(HTTPStatus.OK, {"Connection": "close"}),)
+
+        async with Replier(callback=capture_response, tcp={port: HTTPResponse.read_from}, radio=radio):
+            server = SSDPServer.server_for(InMemoryResource(b"hi", {"Content-Type": "text/plain"}), path="/thing", radio=radio)
+            request = HTTPRequest(HTTPMethod.GET, URI.parse("/thing"), {str(TCP_PORT): str(port)})
+
+            responses = await server.respond(request, Endpoint(LOOPBACK, 0), LOCAL)
+
+            assert tuple(responses) == ()
+            assert len(received) == 1
+            assert received[0].status == HTTPStatus.OK
+            assert received[0].headers["Content-Type"] == "text/plain"
 
 
 async def wait_until(condition, interval: float = 0.01) -> None:

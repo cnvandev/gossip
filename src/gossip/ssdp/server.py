@@ -12,7 +12,6 @@ from gossip.network.endpoint import Endpoint
 from gossip.network.prompter import Prompter
 from gossip.network.radio import Radio
 from gossip.network.replier import Replier
-from gossip.network.serializer import Serializable
 from gossip.ssdp.extension import DISCOVER
 from gossip.ssdp.headers import SEARCH_PORT, TCP_PORT
 from gossip.ssdp.responder import SSDPResponder
@@ -38,12 +37,17 @@ class SSDPServer(HTTPServer):
     def __init__(
         self,
         resources: Mapping[URI, ResourceCollection],
+        prompter: Prompter[HTTPResponse] | None = None,
         replier: Replier[HTTPRequest] | None = None,
         responder: SSDPResponder | None = None,
         udp_port: int = SSDP_HOST.port,
         radio: Radio | None = None,
     ):
-        if not replier:
+        if prompter is None:
+            prompter = Prompter(HTTPResponse.read_from, radio=radio)
+        self.prompter = prompter
+
+        if replier is None:
             udp_ports = {
                 # Listen for multicast messages on the SSDP port.
                 SSDP_HOST: HTTPRequest.read_from,
@@ -54,7 +58,7 @@ class SSDPServer(HTTPServer):
             }
             replier = Replier(callback=self.respond, udp=udp_ports, tcp=tcp_ports, radio=radio)
 
-        if not responder:
+        if responder is None:
             # If we're given a UDP port, include it in the static headers.
             if udp_port != SSDP_HOST.port:
                 static_headers = {str(SEARCH_PORT): str(udp_port)}
@@ -70,13 +74,12 @@ class SSDPServer(HTTPServer):
             )
 
         super().__init__(resources, replier, responder)
-        self.prompter = Prompter(HTTPResponse.read_from, radio=radio)
 
     def notification_request(self, headers: Mapping[str, str], local: Endpoint) -> HTTPRequest:
         """Builds one interface's `NOTIFY` request, `Location` pointing at our device description via `local`'s own address."""
         base = URI.parse(f"http://{local}")
         notify_headers = dict(headers) | {
-            "Location": str(base.join(str(headers["Location"]))),
+            "Location": str(base.join(headers["Location"])),
         }
         return HTTPRequest("NOTIFY", URI.parse("*"), notify_headers)
 
@@ -93,7 +96,7 @@ class SSDPServer(HTTPServer):
                 "Host": str(SSDP_HOST),
                 "NT": subresource_path,
                 "NTS": str(subtype),
-                "Location": uri,
+                "Location": str(uri),
                 "Cache-Control": "max-age=1800",
                 **subresource_headers,
             }
@@ -109,14 +112,14 @@ class SSDPServer(HTTPServer):
             for notification in notifications
         ))
 
-    async def respond(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> Iterable[Serializable]:
+    async def respond(self, request: HTTPRequest, remote: Endpoint, local: Endpoint) -> Iterable[HTTPResponse]:
         responses = await self.responder.respond(request, remote, local)
 
         # If the response is for a request with a TCP port specified, we'll
         # respond out-of-band here.
         if port_constraint := request.headers.get(str(TCP_PORT), None):
             log.debug("Writing to TCP port %s", port_constraint)
-            destination = Endpoint(remote.address, int(port_constraint[0]))
+            destination = Endpoint(remote.address, int(port_constraint))
             sessions = await asyncio.gather(*(self.prompter.prompt_tcp(response, destination) for response in responses))
             await asyncio.gather(*(session.read_reply() for session in sessions))
             return ()
