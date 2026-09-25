@@ -33,12 +33,12 @@ class HTTPServer:
     summary: Mapping[str | IPv4Address | IPv6Address, int]
 
     def __init__(self, resources: Mapping[URI, ResourceCollection], replier: Replier[HTTPRequest] | None = None, responder: HTTPResponder | None = None):
-        if replier is None:
-            tcp_ports = {80: HTTPRequest.read_from}
-            replier = Replier(callback=self.responder.respond, tcp=tcp_ports)
         if responder is None:
             accessor = HTTPAccessor()
             responder = HTTPResponder(resources, accessor)
+        if replier is None:
+            tcp_ports = {80: HTTPRequest.read_from}
+            replier = Replier(callback=responder.respond, tcp=tcp_ports)
         self.resources = resources
         self.replier = replier
         self.responder = responder
